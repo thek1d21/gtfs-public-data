@@ -23,7 +23,7 @@ body {
   border-radius: 12px;
 }
 
-/* Key fixes for polyline rendering issues */
+/* Stable popup styles - inspired by demo simplicity */
 .leaflet-popup-content-wrapper {
   border-radius: 16px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
@@ -79,40 +79,14 @@ body {
   background-color: #94a3b8;
 }
 
-/* CRITICAL FIXES for Leaflet polyline rendering issues */
-
-/* Fix 1: Prevent canvas-related errors by ensuring proper SVG rendering */
+/* Simplified polyline styles - no complex fixes needed */
 .leaflet-overlay-pane svg {
-  pointer-events: auto !important;
+  pointer-events: auto;
 }
 
 .leaflet-overlay-pane svg path {
-  stroke-linecap: round !important;
-  stroke-linejoin: round !important;
-  vector-effect: non-scaling-stroke !important;
-  pointer-events: none !important; /* Key fix: Prevent interaction issues */
-}
-
-/* Fix 2: Ensure smooth zoom animations without glitches */
-.leaflet-zoom-animated {
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-
-/* Fix 3: Prevent rendering artifacts during zoom/pan */
-.leaflet-overlay-pane {
-  will-change: transform;
-  transform-origin: 0 0 !important;
-}
-
-/* Fix 4: Ensure polylines don't interfere with map interactions */
-.leaflet-interactive {
-  outline: none !important;
-  pointer-events: auto !important;
-}
-
-/* Fix 5: Prevent any canvas-related issues */
-.leaflet-layer {
-  position: relative !important;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Enhanced next arrivals styling */

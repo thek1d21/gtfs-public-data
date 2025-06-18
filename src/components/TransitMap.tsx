@@ -35,8 +35,8 @@ const selectedStopIcon = createCustomIcon('#FFB800', 28, true);
 const routeStopIcon = createCustomIcon('#00A8E6', 26, true);
 const routeStopHighlighted = createCustomIcon('#0066CC', 30, true);
 
-// Fixed Route Polyline Component - addresses the canvas error
-function RoutePolylines({ 
+// Simplified and stable Route Polyline Component - inspired by your demo
+function StableRoutePolylines({ 
   shapes, 
   selectedRoute, 
   routes 
@@ -52,10 +52,8 @@ function RoutePolylines({
     weight: number;
     opacity: number;
     dashArray?: string;
-    isMain: boolean;
   }>>([]);
 
-  // Key fix: Ensure we have valid data before rendering
   useEffect(() => {
     if (!selectedRoute || !shapes || shapes.length === 0) {
       setRouteLines([]);
@@ -63,10 +61,9 @@ function RoutePolylines({
     }
 
     try {
-      // Group shapes by shape_id for different itineraries
+      // Simple approach: Group shapes by shape_id and render each as a separate polyline
       const shapeGroups = shapes.reduce((acc, shape) => {
-        // Validate shape data
-        if (!shape || !shape.shape_id || typeof shape.shape_pt_lat !== 'number' || typeof shape.shape_pt_lon !== 'number') {
+        if (!shape?.shape_id || typeof shape.shape_pt_lat !== 'number' || typeof shape.shape_pt_lon !== 'number') {
           return acc;
         }
         
@@ -77,32 +74,27 @@ function RoutePolylines({
         return acc;
       }, {} as Record<string, Shape[]>);
 
-      // Get route color
       const route = routes.find(r => r.route_id === selectedRoute);
       const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
 
-      // Create polyline data for each shape/itinerary
+      // Create simple polylines - no complex logic
       const lines = Object.entries(shapeGroups)
-        .filter(([shapeId, shapePoints]) => shapePoints && shapePoints.length > 1) // Ensure we have enough points
+        .filter(([_, shapePoints]) => shapePoints && shapePoints.length > 1)
         .map(([shapeId, shapePoints], index) => {
           const sortedPoints = shapePoints
             .filter(point => point && typeof point.shape_pt_lat === 'number' && typeof point.shape_pt_lon === 'number')
             .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
             .map(point => [point.shape_pt_lat, point.shape_pt_lon] as [number, number]);
 
-          // Validate we have valid coordinates
           if (sortedPoints.length < 2) return null;
 
-          const isMainItinerary = index === 0;
-          
           return {
             id: shapeId,
             positions: sortedPoints,
             color: baseColor,
-            weight: isMainItinerary ? 6 : 4,
-            opacity: 0.8,
-            dashArray: isMainItinerary ? undefined : '10,5',
-            isMain: isMainItinerary
+            weight: index === 0 ? 5 : 3,
+            opacity: 0.7,
+            dashArray: index === 0 ? undefined : '8,4'
           };
         })
         .filter(Boolean) as Array<{
@@ -112,7 +104,6 @@ function RoutePolylines({
           weight: number;
           opacity: number;
           dashArray?: string;
-          isMain: boolean;
         }>;
 
       setRouteLines(lines);
@@ -122,38 +113,25 @@ function RoutePolylines({
     }
   }, [shapes, selectedRoute, routes]);
 
-  // Key fix: Render polylines safely with error boundaries
+  // Simple rendering - similar to your demo approach
   return (
     <>
-      {routeLines.map((line) => {
-        // Additional validation before rendering
-        if (!line || !line.positions || line.positions.length < 2) {
-          return null;
-        }
-
-        return (
-          <Polyline
-            key={`polyline-${line.id}`}
-            positions={line.positions}
-            pathOptions={{
-              color: line.color,
-              weight: line.weight,
-              opacity: line.opacity,
-              dashArray: line.dashArray,
-              lineCap: 'round',
-              lineJoin: 'round',
-              interactive: false, // Key fix: Make polylines non-interactive to prevent canvas errors
-              bubblingMouseEvents: false // Additional fix
-            }}
-          />
-        );
-      })}
+      {routeLines.map((line) => (
+        <Polyline
+          key={line.id}
+          positions={line.positions}
+          color={line.color}
+          weight={line.weight}
+          opacity={line.opacity}
+          dashArray={line.dashArray}
+        />
+      ))}
     </>
   );
 }
 
-// Enhanced component to fit map bounds to selected route with smooth animation
-function RouteMapBounds({ 
+// Enhanced component to fit map bounds - stable approach
+function MapBounds({ 
   stops, 
   shapes, 
   selectedRoute, 
@@ -170,14 +148,14 @@ function RouteMapBounds({
     if (selectedRoute && (routeStops.length > 0 || shapes.length > 0)) {
       const bounds = new LatLngBounds([]);
       
-      // Add route stops bounds with priority
+      // Add route stops bounds
       routeStops.forEach(stop => {
         if (stop && typeof stop.stop_lat === 'number' && typeof stop.stop_lon === 'number') {
           bounds.extend([stop.stop_lat, stop.stop_lon]);
         }
       });
       
-      // Add shape bounds for complete route coverage
+      // Add shape bounds
       shapes.forEach(shape => {
         if (shape && typeof shape.shape_pt_lat === 'number' && typeof shape.shape_pt_lon === 'number') {
           bounds.extend([shape.shape_pt_lat, shape.shape_pt_lon]);
@@ -185,18 +163,15 @@ function RouteMapBounds({
       });
       
       if (bounds.isValid()) {
-        // Smooth zoom to route with padding
         map.fitBounds(bounds, { 
           padding: [50, 50],
-          maxZoom: 14,
-          animate: true,
-          duration: 1.5
+          maxZoom: 14
         });
       }
     } else {
-      // Default view showing all stops
+      // Default view
       const bounds = new LatLngBounds([]);
-      stops.slice(0, 100).forEach(stop => { // Limit for performance
+      stops.slice(0, 100).forEach(stop => {
         if (stop && typeof stop.stop_lat === 'number' && typeof stop.stop_lon === 'number') {
           bounds.extend([stop.stop_lat, stop.stop_lon]);
         }
@@ -205,9 +180,7 @@ function RouteMapBounds({
       if (bounds.isValid()) {
         map.fitBounds(bounds, { 
           padding: [20, 20],
-          maxZoom: 12,
-          animate: true,
-          duration: 1
+          maxZoom: 12
         });
       }
     }
@@ -245,20 +218,20 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       const routeTripsData = trips.filter(trip => trip.route_id === selectedRoute);
       setRouteTrips(routeTripsData);
       
-      // Get all unique shape IDs for this route (handles multiple itineraries)
+      // Get all unique shape IDs for this route
       const shapeIds = [...new Set(routeTripsData.map(trip => trip.shape_id).filter(Boolean))];
       
-      // Get all shapes for all itineraries of this route
+      // Get all shapes for this route
       const routeShapePoints = shapes.filter(shape => shapeIds.includes(shape.shape_id));
       setRouteShapes(routeShapePoints);
       
-      // Get all stops for this route from stop_times
+      // Get all stops for this route
       const routeTripIds = routeTripsData.map(trip => trip.trip_id);
       const routeStopTimes = stopTimes.filter(st => routeTripIds.includes(st.trip_id));
       const uniqueStopIds = [...new Set(routeStopTimes.map(st => st.stop_id))];
       const stopsForRoute = stops.filter(stop => uniqueStopIds.includes(stop.stop_id));
       
-      // Sort stops by their sequence in the route
+      // Sort stops by sequence
       const sortedRouteStops = stopsForRoute.sort((a, b) => {
         const aStopTime = routeStopTimes.find(st => st.stop_id === a.stop_id);
         const bStopTime = routeStopTimes.find(st => st.stop_id === b.stop_id);
@@ -266,7 +239,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       });
       
       setRouteStops(sortedRouteStops);
-      setFilteredStops(stops); // Show all stops but highlight route stops
+      setFilteredStops(stops);
     } else {
       setFilteredStops(stops);
       setRouteShapes([]);
@@ -299,17 +272,13 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     const currentTime = new Date();
     const currentTimeStr = `${currentTime.getHours().toString().padStart(2, '0')}:${currentTime.getMinutes().toString().padStart(2, '0')}:00`;
     
-    // Get all stop times for this stop
     const stopStopTimes = stopTimes.filter(st => st.stop_id === stop.stop_id);
-    
-    // Group by route
     const routeArrivals = new Map<string, string[]>();
     
     stopStopTimes.forEach(st => {
       const trip = trips.find(t => t.trip_id === st.trip_id);
       if (!trip || !st.departure_time) return;
       
-      // Only include future departures (next 24 hours)
       if (st.departure_time >= currentTimeStr) {
         if (!routeArrivals.has(trip.route_id)) {
           routeArrivals.set(trip.route_id, []);
@@ -318,16 +287,12 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       }
     });
     
-    // Sort and limit to next 5 arrivals per route
     const routeInfo = Array.from(routeArrivals.entries()).map(([routeId, times]) => {
       const route = routes.find(r => r.route_id === routeId);
       if (!route) return null;
       
       const sortedTimes = times.sort().slice(0, 5);
-      return {
-        route,
-        nextArrivals: sortedTimes
-      };
+      return { route, nextArrivals: sortedTimes };
     }).filter(Boolean) as Array<{ route: Route; nextArrivals: string[] }>;
     
     return routeInfo.sort((a, b) => a.route.route_short_name.localeCompare(b.route.route_short_name));
@@ -364,7 +329,6 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     return Math.round((targetTime.getTime() - now.getTime()) / (1000 * 60));
   };
 
-  // Get route color with enhanced visibility
   const getRouteColor = (routeId: string): string => {
     const route = routes.find(r => r.route_id === routeId);
     return route?.route_color ? `#${route.route_color}` : '#0066CC';
@@ -372,62 +336,36 @@ export const TransitMap: React.FC<TransitMapProps> = ({
 
   const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
 
-  // Get itinerary information
-  const getItineraryInfo = () => {
-    if (!selectedRoute || routeTrips.length === 0) return [];
-    
-    const itineraries = new Map<string, { direction: number; trips: number; shapeId: string }>();
-    
-    routeTrips.forEach(trip => {
-      const key = `${trip.direction_id}-${trip.shape_id}`;
-      if (!itineraries.has(key)) {
-        itineraries.set(key, {
-          direction: trip.direction_id,
-          trips: 0,
-          shapeId: trip.shape_id
-        });
-      }
-      itineraries.get(key)!.trips++;
-    });
-    
-    return Array.from(itineraries.values());
-  };
-
-  const itineraryInfo = getItineraryInfo();
-
   return (
     <div className="h-full w-full relative">
       <MapContainer
+        doubleClickZoom={false} // From your demo - prevents accidental zoom
         center={[40.6, -3.9]}
         zoom={11}
         className="h-full w-full"
         zoomControl={true}
-        preferCanvas={false} // Key fix: Use SVG renderer instead of Canvas
-        renderer={undefined} // Let Leaflet choose the best renderer
       >
+        {/* Using ArcGIS tiles like your demo for stability */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          updateWhenIdle={true} // Key fix: Reduce updates during zoom/pan
-          updateWhenZooming={false} // Key fix: Don't update tiles while zooming
-          keepBuffer={2}
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+          attribution="Tiles &copy; Esri &mdash; Sources: GEBCO, NOAA, CHS, OSU, UNH, CSUMB, National Geographic, DeLorme, NAVTEQ, and Esri"
         />
         
-        <RouteMapBounds 
+        <MapBounds 
           stops={filteredStops} 
           shapes={routeShapes} 
           selectedRoute={selectedRoute}
           routeStops={routeStops}
         />
         
-        {/* Fixed Route Polylines - No more canvas errors */}
-        <RoutePolylines
+        {/* Stable Route Polylines - simplified approach */}
+        <StableRoutePolylines
           shapes={routeShapes}
           selectedRoute={selectedRoute}
           routes={routes}
         />
         
-        {/* Enhanced Stops with better visibility */}
+        {/* Enhanced Stops */}
         {filteredStops.map((stop) => {
           const accessibility = getAccessibilityInfo(stop.wheelchair_boarding);
           const isRouteStop = selectedRoute && routeStops.some(rs => rs.stop_id === stop.stop_id);
@@ -591,7 +529,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         })}
       </MapContainer>
 
-      {/* Compact Route Details Panel - Bottom Right */}
+      {/* Route Details Panel */}
       {selectedRoute && selectedRouteData && (
         <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000] max-w-xs border border-gray-200">
           <div className="flex items-center gap-2 mb-2">
@@ -618,25 +556,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               <div className="text-blue-700">Stops</div>
             </div>
             <div className="bg-green-50 rounded p-2 text-center">
-              <div className="font-bold text-green-900">{itineraryInfo.length}</div>
-              <div className="text-green-700">Variants</div>
+              <div className="font-bold text-green-900">{routeShapes.length > 0 ? Math.round(routeShapes.length / 100) : 0}km</div>
+              <div className="text-green-700">Distance</div>
             </div>
           </div>
-          
-          {itineraryInfo.length > 0 && (
-            <div className="mt-2 text-xs text-gray-600">
-              {itineraryInfo.map((itinerary, index) => (
-                <div key={index} className="flex items-center gap-1">
-                  <div className={`w-1.5 h-1.5 rounded-full ${index === 0 ? 'bg-blue-500' : 'bg-blue-300'}`}></div>
-                  <span>Dir {itinerary.direction} ({itinerary.trips})</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
-      {/* Compact Legend - Bottom Left */}
+      {/* Legend */}
       <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-3 z-[1000] border border-gray-200">
         <h4 className="text-xs font-bold text-gray-900 mb-2">Legend</h4>
         <div className="space-y-1 text-xs">
@@ -656,23 +583,19 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-0.5 bg-blue-600 rounded"></div>
-                <span className="text-gray-700">Main Route</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-0.5 bg-blue-400 rounded border-dashed border border-blue-400"></div>
-                <span className="text-gray-700">Variant</span>
+                <span className="text-gray-700">Route Line</span>
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Route Status Indicator - Top Right */}
+      {/* Status Indicator */}
       {selectedRoute && (
         <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-3 py-1.5 z-[1000] shadow-lg">
           <div className="flex items-center gap-2 text-xs font-medium">
             <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-            <span>Route Active • {routeShapes.length > 0 ? Math.round(routeShapes.length / 100) : 0}km</span>
+            <span>Route Active • {routeStops.length} stops</span>
           </div>
         </div>
       )}
