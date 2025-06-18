@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Stop, Route, Trip, StopTime } from '../types/gtfs';
-import { MapPin, Navigation, Clock, ArrowRight, Bus, AlertCircle, CheckCircle, Route as RouteIcon } from 'lucide-react';
+import { MapPin, Navigation, Clock, ArrowRight, Bus, AlertCircle, CheckCircle, Router as RouteIcon } from 'lucide-react';
 
 interface JourneyPlannerProps {
   stops: Stop[];
