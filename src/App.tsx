@@ -69,6 +69,11 @@ function App() {
     setSelectedRouteDetails(route);
   };
 
+  const handleStopClick = (stop: Stop) => {
+    console.log('Stop clicked:', stop);
+    // Additional stop click handling can be added here
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -160,7 +165,9 @@ function App() {
                     routes={data.routes}
                     shapes={data.shapes}
                     trips={data.trips}
+                    stopTimes={data.stopTimes}
                     selectedRoute={selectedRoute}
+                    onStopClick={handleStopClick}
                   />
                 </div>
               </div>

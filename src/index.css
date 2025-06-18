@@ -139,6 +139,35 @@ body {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
 }
 
+/* Route highlighting animation */
+.route-highlighted {
+  animation: routePulse 2s ease-in-out infinite;
+}
+
+@keyframes routePulse {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.7; }
+}
+
+/* Enhanced map controls */
+.map-control-panel {
+  backdrop-filter: blur(10px);
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+/* Next arrivals styling */
+.arrival-time {
+  @apply inline-flex items-center gap-1 bg-blue-50 text-blue-800 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+.arrival-time.urgent {
+  @apply bg-red-50 text-red-800;
+}
+
+.arrival-time.soon {
+  @apply bg-yellow-50 text-yellow-800;
+}
+
 /* Responsive text */
 @media (max-width: 640px) {
   .stats-card {
@@ -148,4 +177,22 @@ body {
   .stats-card p:first-child {
     @apply text-xl;
   }
+  
+  .custom-popup {
+    max-width: 280px !important;
+  }
+}
+
+/* Enhanced stop markers */
+.leaflet-marker-icon {
+  transition: transform 0.2s ease-in-out;
+}
+
+.leaflet-marker-icon:hover {
+  transform: scale(1.1);
+}
+
+/* Route stop highlighting */
+.route-stop-marker {
+  filter: drop-shadow(0 0 8px rgba(0, 168, 230, 0.6));
 }

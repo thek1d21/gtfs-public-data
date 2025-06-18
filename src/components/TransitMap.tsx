@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { Icon, LatLngBounds } from 'leaflet';
-import { Stop, Route, Shape, Trip } from '../types/gtfs';
-import { MapPin, Bus, Accessibility, Navigation, Info } from 'lucide-react';
+import { Stop, Route, Shape, Trip, StopTime } from '../types/gtfs';
+import { MapPin, Bus, Accessibility, Navigation, Info, Clock, ArrowRight } from 'lucide-react';
 
 interface TransitMapProps {
   stops: Stop[];
   routes: Route[];
   shapes: Shape[];
   trips: Trip[];
+  stopTimes: StopTime[];
   selectedRoute?: string;
   onStopClick?: (stop: Stop) => void;
   onRouteClick?: (route: Route) => void;
@@ -30,6 +31,7 @@ const createCustomIcon = (color: string, size: number = 24) => new Icon({
 const busStopIcon = createCustomIcon('#8EBF42');
 const interchangeIcon = createCustomIcon('#E60003', 32);
 const selectedStopIcon = createCustomIcon('#FFB800', 28);
+const routeStopIcon = createCustomIcon('#00A8E6', 26);
 
 // Component to fit map bounds to stops
 function MapBounds({ stops, shapes, selectedRoute }: { stops: Stop[], shapes: Shape[], selectedRoute?: string }) {
@@ -63,13 +65,22 @@ export const TransitMap: React.FC<TransitMapProps> = ({
   routes, 
   shapes, 
   trips, 
+  stopTimes,
   selectedRoute,
   onStopClick,
   onRouteClick
 }) => {
   const [filteredStops, setFilteredStops] = useState<Stop[]>(stops);
   const [routeShapes, setRouteShapes] = useState<Shape[]>([]);
+  const [routeStops, setRouteStops] = useState<Stop[]>([]);
   const [hoveredStop, setHoveredStop] = useState<string | null>(null);
+  const [selectedStopDetails, setSelectedStopDetails] = useState<{
+    stop: Stop;
+    routeInfo: Array<{
+      route: Route;
+      nextArrivals: string[];
+    }>;
+  } | null>(null);
 
   useEffect(() => {
     if (selectedRoute) {
@@ -81,16 +92,24 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       const routeShapePoints = shapes.filter(shape => shapeIds.includes(shape.shape_id));
       setRouteShapes(routeShapePoints);
       
-      // For now, show all stops (in a real app, you'd filter by route stops)
-      setFilteredStops(stops);
+      // Get stops for this route
+      const routeTripIds = routeTrips.map(trip => trip.trip_id);
+      const routeStopTimes = stopTimes.filter(st => routeTripIds.includes(st.trip_id));
+      const uniqueStopIds = [...new Set(routeStopTimes.map(st => st.stop_id))];
+      const stopsForRoute = stops.filter(stop => uniqueStopIds.includes(stop.stop_id));
+      
+      setRouteStops(stopsForRoute);
+      setFilteredStops(stops); // Show all stops but highlight route stops
     } else {
       setFilteredStops(stops);
       setRouteShapes([]);
+      setRouteStops([]);
     }
-  }, [selectedRoute, stops, shapes, trips]);
+  }, [selectedRoute, stops, shapes, trips, stopTimes]);
 
   const getStopIcon = (stop: Stop) => {
     if (hoveredStop === stop.stop_id) return selectedStopIcon;
+    if (selectedRoute && routeStops.some(rs => rs.stop_id === stop.stop_id)) return routeStopIcon;
     return stop.location_type === 1 ? interchangeIcon : busStopIcon;
   };
 
@@ -103,6 +122,76 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       default:
         return { text: 'Unknown', color: 'text-gray-600', icon: '❓' };
     }
+  };
+
+  // Calculate next bus arrivals for a stop
+  const calculateNextArrivals = (stop: Stop) => {
+    const currentTime = new Date();
+    const currentTimeStr = `${currentTime.getHours().toString().padStart(2, '0')}:${currentTime.getMinutes().toString().padStart(2, '0')}:00`;
+    
+    // Get all stop times for this stop
+    const stopStopTimes = stopTimes.filter(st => st.stop_id === stop.stop_id);
+    
+    // Group by route
+    const routeArrivals = new Map<string, string[]>();
+    
+    stopStopTimes.forEach(st => {
+      const trip = trips.find(t => t.trip_id === st.trip_id);
+      if (!trip || !st.departure_time) return;
+      
+      // Only include future departures
+      if (st.departure_time > currentTimeStr) {
+        if (!routeArrivals.has(trip.route_id)) {
+          routeArrivals.set(trip.route_id, []);
+        }
+        routeArrivals.get(trip.route_id)!.push(st.departure_time);
+      }
+    });
+    
+    // Sort and limit to next 3-5 arrivals per route
+    const routeInfo = Array.from(routeArrivals.entries()).map(([routeId, times]) => {
+      const route = routes.find(r => r.route_id === routeId);
+      if (!route) return null;
+      
+      const sortedTimes = times.sort().slice(0, 5);
+      return {
+        route,
+        nextArrivals: sortedTimes
+      };
+    }).filter(Boolean) as Array<{ route: Route; nextArrivals: string[] }>;
+    
+    return routeInfo;
+  };
+
+  const handleStopClick = (stop: Stop) => {
+    const routeInfo = calculateNextArrivals(stop);
+    setSelectedStopDetails({ stop, routeInfo });
+    onStopClick?.(stop);
+  };
+
+  const formatTime = (timeStr: string): string => {
+    if (!timeStr || !timeStr.includes(':')) return 'N/A';
+    const [hours, minutes] = timeStr.split(':');
+    const hour = parseInt(hours);
+    const min = minutes;
+    
+    if (hour === 0) return `12:${min} AM`;
+    if (hour < 12) return `${hour}:${min} AM`;
+    if (hour === 12) return `12:${min} PM`;
+    return `${hour - 12}:${min} PM`;
+  };
+
+  const calculateMinutesUntil = (timeStr: string): number => {
+    const now = new Date();
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const targetTime = new Date();
+    targetTime.setHours(hours, minutes, 0, 0);
+    
+    if (targetTime < now) {
+      targetTime.setDate(targetTime.getDate() + 1);
+    }
+    
+    return Math.round((targetTime.getTime() - now.getTime()) / (1000 * 60));
   };
 
   // Group shapes by shape_id for polylines
@@ -120,6 +209,8 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     return route?.route_color ? `#${route.route_color}` : '#8EBF42';
   };
 
+  const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
+
   return (
     <div className="h-full w-full relative">
       <MapContainer
@@ -135,7 +226,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         
         <MapBounds stops={filteredStops} shapes={routeShapes} selectedRoute={selectedRoute} />
         
-        {/* Route Shapes */}
+        {/* Route Shapes - Highlighted when route is selected */}
         {Object.entries(shapeGroups).map(([shapeId, shapePoints]) => {
           const sortedPoints = shapePoints
             .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
@@ -146,8 +237,9 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               key={shapeId}
               positions={sortedPoints}
               color={selectedRoute ? getRouteColor(selectedRoute) : '#8EBF42'}
-              weight={4}
-              opacity={0.8}
+              weight={selectedRoute ? 6 : 4}
+              opacity={selectedRoute ? 0.9 : 0.6}
+              className={selectedRoute ? 'route-highlighted' : ''}
             />
           );
         })}
@@ -155,6 +247,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         {/* Stops */}
         {filteredStops.map((stop) => {
           const accessibility = getAccessibilityInfo(stop.wheelchair_boarding);
+          const isRouteStop = selectedRoute && routeStops.some(rs => rs.stop_id === stop.stop_id);
           
           return (
             <Marker
@@ -164,11 +257,11 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               eventHandlers={{
                 mouseover: () => setHoveredStop(stop.stop_id),
                 mouseout: () => setHoveredStop(null),
-                click: () => onStopClick?.(stop)
+                click: () => handleStopClick(stop)
               }}
             >
-              <Popup className="custom-popup">
-                <div className="min-w-[280px]">
+              <Popup className="custom-popup" maxWidth={400}>
+                <div className="min-w-[320px]">
                   <div className="flex items-start gap-3 mb-3">
                     <div className="flex-shrink-0 p-2 bg-madrid-primary/10 rounded-lg">
                       {stop.location_type === 1 ? (
@@ -184,6 +277,13 @@ export const TransitMap: React.FC<TransitMapProps> = ({
                       <p className="text-xs text-gray-600 mt-1">
                         Code: {stop.stop_code}
                       </p>
+                      {isRouteStop && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            On Selected Route
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   
@@ -191,6 +291,47 @@ export const TransitMap: React.FC<TransitMapProps> = ({
                     <p className="text-xs text-gray-700 mb-3 leading-relaxed">
                       {stop.stop_desc}
                     </p>
+                  )}
+                  
+                  {/* Next Arrivals Section */}
+                  {selectedStopDetails?.stop.stop_id === stop.stop_id && selectedStopDetails.routeInfo.length > 0 && (
+                    <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Clock className="w-4 h-4 text-blue-600" />
+                        <h4 className="font-semibold text-blue-900 text-sm">Next Arrivals</h4>
+                      </div>
+                      <div className="space-y-3">
+                        {selectedStopDetails.routeInfo.slice(0, 3).map((routeInfo, index) => (
+                          <div key={index} className="bg-white rounded-lg p-2">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`route-badge ${routeInfo.route.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
+                                  {routeInfo.route.route_short_name}
+                                </span>
+                                <span className="text-xs text-gray-600 truncate max-w-[120px]">
+                                  {routeInfo.route.route_long_name}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 flex-wrap">
+                              {routeInfo.nextArrivals.slice(0, 3).map((time, timeIndex) => {
+                                const minutesUntil = calculateMinutesUntil(time);
+                                return (
+                                  <div key={timeIndex} className="flex items-center gap-1 bg-gray-50 rounded px-2 py-1">
+                                    <span className="text-xs font-medium text-gray-900">
+                                      {formatTime(time)}
+                                    </span>
+                                    <span className="text-xs text-gray-600">
+                                      ({minutesUntil}m)
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                   
                   <div className="space-y-2">
@@ -236,15 +377,13 @@ export const TransitMap: React.FC<TransitMapProps> = ({
                     >
                       View on CRTM →
                     </a>
-                    {onStopClick && (
-                      <button
-                        onClick={() => onStopClick(stop)}
-                        className="flex-1 text-xs text-white bg-madrid-primary hover:bg-madrid-primary/90 font-medium text-center py-2 rounded-lg transition-colors"
-                      >
-                        <Info className="w-3 h-3 inline mr-1" />
-                        Details
-                      </button>
-                    )}
+                    <button
+                      onClick={() => handleStopClick(stop)}
+                      className="flex-1 text-xs text-white bg-madrid-primary hover:bg-madrid-primary/90 font-medium text-center py-2 rounded-lg transition-colors"
+                    >
+                      <Info className="w-3 h-3 inline mr-1" />
+                      Refresh Times
+                    </button>
                   </div>
                 </div>
               </Popup>
@@ -254,16 +393,52 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       </MapContainer>
 
       {/* Map Controls */}
-      {selectedRoute && (
-        <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-3 z-[1000]">
-          <div className="flex items-center gap-2">
+      {selectedRoute && selectedRouteData && (
+        <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-4 z-[1000] max-w-xs">
+          <div className="flex items-center gap-3 mb-2">
             <div className="w-4 h-4 rounded-full" style={{ backgroundColor: getRouteColor(selectedRoute) }}></div>
-            <span className="text-sm font-medium text-gray-900">
-              Route {routes.find(r => r.route_id === selectedRoute)?.route_short_name}
-            </span>
+            <div>
+              <span className="text-sm font-semibold text-gray-900">
+                Route {selectedRouteData.route_short_name}
+              </span>
+              <p className="text-xs text-gray-600 mt-1">
+                {selectedRouteData.route_long_name}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-gray-600">
+            <div className="flex items-center gap-1">
+              <MapPin className="w-3 h-3" />
+              <span>{routeStops.length} stops</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Navigation className="w-3 h-3" />
+              <span>Route highlighted</span>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Legend */}
+      <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000]">
+        <h4 className="text-xs font-semibold text-gray-900 mb-2">Map Legend</h4>
+        <div className="space-y-1 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-green-500"></div>
+            <span className="text-gray-600">Regular Stop</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-red-600"></div>
+            <span className="text-gray-600">Interchange</span>
+          </div>
+          {selectedRoute && (
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+              <span className="text-gray-600">Route Stop</span>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
