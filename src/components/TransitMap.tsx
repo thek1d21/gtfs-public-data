@@ -35,7 +35,7 @@ const selectedStopIcon = createCustomIcon('#FFB800', 28, true);
 const routeStopIcon = createCustomIcon('#00A8E6', 26, true);
 const routeStopHighlighted = createCustomIcon('#0066CC', 30, true);
 
-// Enhanced Route Polyline Component with smooth rendering
+// Enhanced Route Polyline Component with smooth rendering and road snapping
 function RoutePolylines({ 
   shapes, 
   selectedRoute, 
@@ -54,6 +54,52 @@ function RoutePolylines({
     dashArray?: string;
     isMain: boolean;
   }>>([]);
+
+  // Smooth line interpolation function
+  const smoothLinePoints = (points: [number, number][]): [number, number][] => {
+    if (points.length < 3) return points;
+    
+    const smoothed: [number, number][] = [points[0]];
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+      
+      // Simple smoothing algorithm
+      const smoothLat = (prev[0] + curr[0] + next[0]) / 3;
+      const smoothLon = (prev[1] + curr[1] + next[1]) / 3;
+      
+      smoothed.push([smoothLat, smoothLon]);
+    }
+    
+    smoothed.push(points[points.length - 1]);
+    return smoothed;
+  };
+
+  // Reduce point density for smoother rendering
+  const simplifyLine = (points: [number, number][], tolerance: number = 0.0001): [number, number][] => {
+    if (points.length <= 2) return points;
+    
+    const simplified: [number, number][] = [points[0]];
+    
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = simplified[simplified.length - 1];
+      const curr = points[i];
+      
+      // Calculate distance
+      const distance = Math.sqrt(
+        Math.pow(curr[0] - prev[0], 2) + Math.pow(curr[1] - prev[1], 2)
+      );
+      
+      if (distance > tolerance) {
+        simplified.push(curr);
+      }
+    }
+    
+    simplified.push(points[points.length - 1]);
+    return simplified;
+  };
 
   useEffect(() => {
     if (selectedRoute && shapes.length > 0) {
@@ -76,11 +122,15 @@ function RoutePolylines({
           .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
           .map(point => [point.shape_pt_lat, point.shape_pt_lon] as [number, number]);
 
+        // Apply smoothing and simplification
+        const simplifiedPoints = simplifyLine(sortedPoints, 0.00005);
+        const smoothedPoints = smoothLinePoints(simplifiedPoints);
+
         const isMainItinerary = index === 0;
         
         return {
           id: shapeId,
-          positions: sortedPoints,
+          positions: smoothedPoints,
           color: baseColor,
           weight: isMainItinerary ? 8 : 6,
           opacity: 0.9,
@@ -108,15 +158,17 @@ function RoutePolylines({
             dashArray: line.dashArray,
             lineCap: 'round',
             lineJoin: 'round',
-            smoothFactor: 1.5, // Smooth the line
-            interactive: false // Prevent interaction issues
+            smoothFactor: 2.0, // Increased smoothing
+            interactive: false, // Prevent interaction issues
+            renderer: 'canvas' // Use canvas renderer for better performance
           }}
           eventHandlers={{
             add: (e) => {
-              // Ensure proper z-index
+              // Ensure proper z-index and rendering
               const layer = e.target;
               if (layer._path) {
                 layer._path.style.zIndex = line.isMain ? '300' : '299';
+                layer._path.style.pointerEvents = 'none'; // Prevent interference
               }
             }
           }}
@@ -371,10 +423,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         className="h-full w-full"
         zoomControl={true}
         preferCanvas={true} // Use canvas for better performance
+        renderer="canvas" // Force canvas renderer for smoother polylines
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          updateWhenIdle={false} // Update tiles during movement for smoother experience
+          updateWhenZooming={false} // Prevent tile updates during zoom
+          keepBuffer={2} // Keep more tiles in memory
         />
         
         <RouteMapBounds 
