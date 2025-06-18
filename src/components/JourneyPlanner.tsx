@@ -61,6 +61,18 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   const [showFromDropdown, setShowFromDropdown] = useState<boolean>(false);
   const [showToDropdown, setShowToDropdown] = useState<boolean>(false);
 
+  // Calculate distance between stops using Haversine formula - MOVED TO TOP
+  const calculateDistance = (stop1: Stop, stop2: Stop): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
+    const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return Math.round(R * c * 100) / 100;
+  };
+
   // NEW: Consolidate stops by physical location
   const consolidatedStops = useMemo(() => {
     const stopGroups = new Map<string, Stop[]>();
@@ -621,18 +633,6 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     }
     
     return endTotalMinutes - startTotalMinutes;
-  };
-
-  // Calculate distance between stops using Haversine formula
-  const calculateDistance = (stop1: Stop, stop2: Stop): number => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
-    const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return Math.round(R * c * 100) / 100;
   };
 
   // Remove duplicate journeys
