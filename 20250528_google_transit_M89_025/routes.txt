@@ -1,0 +1,13 @@
+﻿route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color
+8__670___,CRTM,670,COLLADO VILLALBA (Hospital)-MORALZARZAL,,3,https://www.crtm.es/8__670___.aspx,8EBF42,FFFFFF
+8__671___,CRTM,671,MADRID (Moncloa)-MORALZARZAL,,3,https://www.crtm.es/8__671___.aspx,8EBF42,FFFFFF
+8__672___,CRTM,672,MADRID (Moncloa)-CERCEDA (Por Mataelpino),,3,https://www.crtm.es/8__672___.aspx,8EBF42,FFFFFF
+8__672_A__,CRTM,672A,MADRID (Moncloa)-CERCEDA (Directo),,3,https://www.crtm.es/8__672_A__.aspx,8EBF42,FFFFFF
+8__673___,CRTM,673,MADRID (Moncloa)-COLLADO VILLALBA (Hospital),,3,https://www.crtm.es/8__673___.aspx,8EBF42,FFFFFF
+8__876___,CRTM,876,MADRID (Plaza de Castilla)-MORALZARZAL-COLLADO VILLALBA,,3,https://www.crtm.es/8__876___.aspx,8EBF42,FFFFFF
+8_N_603___,CRTM,N603,MADRID (Moncloa)-MORALZARZAL,,3,https://www.crtm.es/8_N_603___.aspx,8EBF42,FFFFFF
+9__1__047_,CRTM,1,FFCC-PQUE. CORUÑA-LOS VALLES-PUEBLO-URBANIZACIONES,,3,https://www.crtm.es/9__1__047_.aspx,E60003,FFFFFF
+9__2__047_,CRTM,2,FFCC-PQUE. CORUÑA-CENTRO SALUD-LOS NEGRALES-FFCC,,3,https://www.crtm.es/9__2__047_.aspx,E60003,FFFFFF
+9__3__047_,CRTM,3,FF.CC. - EL GORRONAL - HOSPITAL,,3,https://www.crtm.es/9__3__047_.aspx,E60003,FFFFFF
+9__4__047_,CRTM,4,FFCC-PQUE. CORUÑA-PUEBLO,,3,https://www.crtm.es/9__4__047_.aspx,E60003,FFFFFF
+9__6__047_,CRTM,6,FFCC-CANTOS ALTOS-PUEBLO-ARROYO ARRIBA,,3,https://www.crtm.es/9__6__047_.aspx,E60003,FFFFFF
