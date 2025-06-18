@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bus, Clock, Calendar, Map, Navigation as NavigationIcon } from 'lucide-react';
+import { Bus, Clock, Calendar, Map, Navigation as NavigationIcon, Bell } from 'lucide-react';
 
 interface NavigationProps {
   activeTab: string;
@@ -12,6 +12,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
     { id: 'planner', label: 'Journey Planner', icon: NavigationIcon },
     { id: 'schedule', label: 'Schedules', icon: Clock },
     { id: 'calendar', label: 'Service Calendar', icon: Calendar },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
   ];
 
   return (

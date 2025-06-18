@@ -14,6 +14,9 @@ import { ScheduleViewer } from './components/ScheduleViewer';
 import { ServiceCalendar } from './components/ServiceCalendar';
 import { RouteDetails } from './components/RouteDetails';
 import { JourneyPlanner } from './components/JourneyPlanner';
+import { NotificationManager } from './components/NotificationManager';
+import { NotificationBanner } from './components/NotificationBanner';
+import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 
 interface GTFSData {
   stops: Stop[];
@@ -51,7 +54,7 @@ interface JourneyResult {
   walkingTime: number;
 }
 
-function App() {
+function AppContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<GTFSData | null>(null);
@@ -59,6 +62,9 @@ function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedRouteDetails, setSelectedRouteDetails] = useState<Route | null>(null);
   const [selectedJourney, setSelectedJourney] = useState<JourneyResult | null>(null);
+
+  // Notification system
+  const { getNotificationsForPage, getNotificationsForRoute, dismissNotification } = useNotifications();
 
   useEffect(() => {
     const loadData = async () => {
@@ -134,8 +140,16 @@ function App() {
 
   const feedInfo = data.feedInfo[0];
 
+  // Get notifications for current page
+  const pageNotifications = getNotificationsForPage(activeTab);
+  
+  // Get notifications for selected route
+  const routeNotifications = selectedRoute ? getNotificationsForRoute(selectedRoute) : [];
+
   const renderContent = () => {
     switch (activeTab) {
+      case 'notifications':
+        return <NotificationManager />;
       case 'schedule':
         return (
           <ScheduleViewer
@@ -274,6 +288,26 @@ function App() {
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Page-level Notifications */}
+        {pageNotifications.length > 0 && (
+          <div className="mb-6">
+            <NotificationBanner
+              notifications={pageNotifications}
+              onDismiss={dismissNotification}
+            />
+          </div>
+        )}
+
+        {/* Route-level Notifications */}
+        {routeNotifications.length > 0 && (
+          <div className="mb-6">
+            <NotificationBanner
+              notifications={routeNotifications}
+              onDismiss={dismissNotification}
+            />
+          </div>
+        )}
+
         {renderContent()}
 
         {/* Footer Info */}
@@ -301,6 +335,14 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <NotificationProvider>
+      <AppContent />
+    </NotificationProvider>
   );
 }
 

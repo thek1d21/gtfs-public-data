@@ -1,0 +1,477 @@
+import React, { useState } from 'react';
+import { useNotifications } from '../contexts/NotificationContext';
+import { Notification } from '../types/notifications';
+import { Plus, Edit, Trash2, Bell, Settings, Save, X, Calendar, Clock, Bus, Navigation, MapPin, Globe } from 'lucide-react';
+
+export const NotificationManager: React.FC = () => {
+  const { notifications, addNotification, updateNotification, removeNotification } = useNotifications();
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<Partial<Notification>>({
+    type: 'info',
+    priority: 'medium',
+    scope: 'global',
+    isActive: true,
+    dismissible: true,
+    autoHide: false,
+    showOnMap: true,
+    showInSchedules: true,
+    showInPlanner: true
+  });
+
+  const resetForm = () => {
+    setFormData({
+      type: 'info',
+      priority: 'medium',
+      scope: 'global',
+      isActive: true,
+      dismissible: true,
+      autoHide: false,
+      showOnMap: true,
+      showInSchedules: true,
+      showInPlanner: true
+    });
+    setIsCreating(false);
+    setEditingId(null);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.title || !formData.message) {
+      alert('Title and message are required');
+      return;
+    }
+
+    if (editingId) {
+      updateNotification(editingId, formData);
+    } else {
+      addNotification(formData as Omit<Notification, 'id' | 'createdAt' | 'updatedAt'>);
+    }
+    
+    resetForm();
+  };
+
+  const handleEdit = (notification: Notification) => {
+    setFormData(notification);
+    setEditingId(notification.id);
+    setIsCreating(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Are you sure you want to delete this notification?')) {
+      removeNotification(id);
+    }
+  };
+
+  const getScopeIcon = (scope: Notification['scope']) => {
+    switch (scope) {
+      case 'route': return Bus;
+      case 'direction': return Navigation;
+      case 'departure': return Clock;
+      case 'page': return MapPin;
+      case 'global': return Globe;
+      default: return Bell;
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-50 rounded-lg">
+            <Bell className="w-6 h-6 text-blue-600" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Notification Manager</h3>
+            <p className="text-sm text-gray-600">Manage warnings and alerts for routes, pages, and schedules</p>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsCreating(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add Notification
+        </button>
+      </div>
+
+      {/* Create/Edit Form */}
+      {isCreating && (
+        <div className="mb-6 p-6 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold text-gray-900">
+              {editingId ? 'Edit Notification' : 'Create New Notification'}
+            </h4>
+            <button
+              onClick={resetForm}
+              className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Basic Info */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Title *</label>
+                <input
+                  type="text"
+                  value={formData.title || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Notification title"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <select
+                  value={formData.type || 'info'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as Notification['type'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="alert">Alert</option>
+                  <option value="maintenance">Maintenance</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Message *</label>
+              <textarea
+                value={formData.message || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, message: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows={3}
+                placeholder="Notification message"
+                required
+              />
+            </div>
+
+            {/* Priority and Scope */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+                <select
+                  value={formData.priority || 'medium'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, priority: e.target.value as Notification['priority'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Scope</label>
+                <select
+                  value={formData.scope || 'global'}
+                  onChange={(e) => setFormData(prev => ({ ...prev, scope: e.target.value as Notification['scope'] }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="global">Global (All pages)</option>
+                  <option value="page">Specific Pages</option>
+                  <option value="route">Specific Routes</option>
+                  <option value="direction">Route Directions</option>
+                  <option value="departure">Departure Times</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Conditional Targeting Fields */}
+            {formData.scope === 'page' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Pages</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {['overview', 'planner', 'schedule', 'calendar'].map(page => (
+                    <label key={page} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.targetPages?.includes(page as any) || false}
+                        onChange={(e) => {
+                          const pages = formData.targetPages || [];
+                          if (e.target.checked) {
+                            setFormData(prev => ({ ...prev, targetPages: [...pages, page as any] }));
+                          } else {
+                            setFormData(prev => ({ ...prev, targetPages: pages.filter(p => p !== page) }));
+                          }
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-sm capitalize">{page}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {formData.scope === 'route' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Routes (comma-separated route IDs)</label>
+                <input
+                  type="text"
+                  value={formData.targetRoutes?.join(', ') || ''}
+                  onChange={(e) => setFormData(prev => ({ 
+                    ...prev, 
+                    targetRoutes: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                  }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g., 8__670___, 8__671___"
+                />
+              </div>
+            )}
+
+            {formData.scope === 'direction' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Directions</label>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Route ID"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <select className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    <option value="0">Outbound (Ida)</option>
+                    <option value="1">Inbound (Vuelta)</option>
+                  </select>
+                  <p className="text-xs text-gray-500">Advanced: Use JSON format for multiple directions</p>
+                </div>
+              </div>
+            )}
+
+            {formData.scope === 'departure' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Route ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., 8__670___"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Time Range Start</label>
+                    <input
+                      type="time"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Time Range End</label>
+                    <input
+                      type="time"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Display Settings */}
+            <div className="space-y-3">
+              <h5 className="font-medium text-gray-900">Display Settings</h5>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Active</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.dismissible || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, dismissible: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Dismissible</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.autoHide || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, autoHide: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Auto Hide</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.showOnMap || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, showOnMap: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Show on Map</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.showInSchedules || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, showInSchedules: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Show in Schedules</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.showInPlanner || false}
+                    onChange={(e) => setFormData(prev => ({ ...prev, showInPlanner: e.target.checked }))}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="text-sm">Show in Planner</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Auto Hide Delay */}
+            {formData.autoHide && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Auto Hide Delay (seconds)</label>
+                <input
+                  type="number"
+                  value={formData.autoHideDelay || 5}
+                  onChange={(e) => setFormData(prev => ({ ...prev, autoHideDelay: parseInt(e.target.value) }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  min="1"
+                  max="60"
+                />
+              </div>
+            )}
+
+            {/* Date Range */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Start Date (optional)</label>
+                <input
+                  type="date"
+                  value={formData.startDate ? formData.startDate.toISOString().split('T')[0] : ''}
+                  onChange={(e) => setFormData(prev => ({ 
+                    ...prev, 
+                    startDate: e.target.value ? new Date(e.target.value) : undefined 
+                  }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">End Date (optional)</label>
+                <input
+                  type="date"
+                  value={formData.endDate ? formData.endDate.toISOString().split('T')[0] : ''}
+                  onChange={(e) => setFormData(prev => ({ 
+                    ...prev, 
+                    endDate: e.target.value ? new Date(e.target.value) : undefined 
+                  }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* Submit Buttons */}
+            <div className="flex items-center gap-3 pt-4">
+              <button
+                type="submit"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Save className="w-4 h-4" />
+                {editingId ? 'Update' : 'Create'} Notification
+              </button>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Notifications List */}
+      <div className="space-y-4">
+        <h4 className="text-lg font-semibold text-gray-900">
+          Active Notifications ({notifications.length})
+        </h4>
+        
+        {notifications.length === 0 ? (
+          <div className="text-center py-8 bg-gray-50 rounded-lg">
+            <Bell className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h5 className="text-lg font-semibold text-gray-900 mb-2">No Notifications</h5>
+            <p className="text-gray-600">Create your first notification to get started.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {notifications.map(notification => {
+              const ScopeIcon = getScopeIcon(notification.scope);
+              
+              return (
+                <div key={notification.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <ScopeIcon className="w-4 h-4 text-gray-600" />
+                        <h5 className="font-semibold text-gray-900">{notification.title}</h5>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          notification.priority === 'critical' ? 'bg-red-100 text-red-800' :
+                          notification.priority === 'high' ? 'bg-orange-100 text-orange-800' :
+                          notification.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {notification.priority}
+                        </span>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          notification.type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+                          notification.type === 'alert' ? 'bg-red-100 text-red-800' :
+                          notification.type === 'maintenance' ? 'bg-blue-100 text-blue-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {notification.type}
+                        </span>
+                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          {notification.scope}
+                        </span>
+                      </div>
+                      <p className="text-gray-700 mb-2">{notification.message}</p>
+                      <div className="text-xs text-gray-500">
+                        Created: {notification.createdAt.toLocaleDateString()} • 
+                        Updated: {notification.updatedAt.toLocaleDateString()}
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 ml-4">
+                      <button
+                        onClick={() => handleEdit(notification)}
+                        className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(notification.id)}
+                        className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
