@@ -158,19 +158,8 @@ function RoutePolylines({
             dashArray: line.dashArray,
             lineCap: 'round',
             lineJoin: 'round',
-            smoothFactor: 2.0, // Increased smoothing
-            interactive: false, // Prevent interaction issues
-            renderer: 'canvas' // Use canvas renderer for better performance
-          }}
-          eventHandlers={{
-            add: (e) => {
-              // Ensure proper z-index and rendering
-              const layer = e.target;
-              if (layer._path) {
-                layer._path.style.zIndex = line.isMain ? '300' : '299';
-                layer._path.style.pointerEvents = 'none'; // Prevent interference
-              }
-            }
+            smoothFactor: 2.0,
+            interactive: false
           }}
         />
       ))}
@@ -422,15 +411,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         zoom={11}
         className="h-full w-full"
         zoomControl={true}
-        preferCanvas={true} // Use canvas for better performance
-        renderer="canvas" // Force canvas renderer for smoother polylines
+        preferCanvas={true}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          updateWhenIdle={false} // Update tiles during movement for smoother experience
-          updateWhenZooming={false} // Prevent tile updates during zoom
-          keepBuffer={2} // Keep more tiles in memory
+          updateWhenIdle={false}
+          updateWhenZooming={false}
+          keepBuffer={2}
         />
         
         <RouteMapBounds 
