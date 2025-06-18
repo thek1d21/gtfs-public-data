@@ -130,7 +130,7 @@ function StableRoutePolylines({
   );
 }
 
-// Enhanced component to fit map bounds - stable approach
+// Enhanced component to fit map bounds with zoom-in functionality
 function MapBounds({ 
   stops, 
   shapes, 
@@ -146,6 +146,7 @@ function MapBounds({
 
   useEffect(() => {
     if (selectedRoute && (routeStops.length > 0 || shapes.length > 0)) {
+      // ZOOM IN: When route is selected, fit bounds to route only
       const bounds = new LatLngBounds([]);
       
       // Add route stops bounds
@@ -155,7 +156,7 @@ function MapBounds({
         }
       });
       
-      // Add shape bounds
+      // Add shape bounds for more precise fitting
       shapes.forEach(shape => {
         if (shape && typeof shape.shape_pt_lat === 'number' && typeof shape.shape_pt_lon === 'number') {
           bounds.extend([shape.shape_pt_lat, shape.shape_pt_lon]);
@@ -163,15 +164,16 @@ function MapBounds({
       });
       
       if (bounds.isValid()) {
+        // Zoom in to fit the entire route with good padding
         map.fitBounds(bounds, { 
-          padding: [50, 50],
-          maxZoom: 14
+          padding: [40, 40],
+          maxZoom: 15 // Allow closer zoom for route details
         });
       }
     } else {
-      // Default view
+      // Default view - show all stops
       const bounds = new LatLngBounds([]);
-      stops.slice(0, 100).forEach(stop => {
+      stops.slice(0, 200).forEach(stop => {
         if (stop && typeof stop.stop_lat === 'number' && typeof stop.stop_lon === 'number') {
           bounds.extend([stop.stop_lat, stop.stop_lon]);
         }
@@ -239,8 +241,15 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       });
       
       setRouteStops(sortedRouteStops);
-      setFilteredStops(stops);
+      
+      // HIDE OTHER ROUTE POINTS: Only show route stops + major interchanges
+      const majorInterchanges = stops.filter(stop => 
+        stop.location_type === 1 && !uniqueStopIds.includes(stop.stop_id)
+      );
+      
+      setFilteredStops([...stopsForRoute, ...majorInterchanges]);
     } else {
+      // Show all stops when no route is selected
       setFilteredStops(stops);
       setRouteShapes([]);
       setRouteStops([]);
@@ -365,11 +374,12 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           routes={routes}
         />
         
-        {/* Enhanced Stops */}
+        {/* Enhanced Stops - Only show filtered stops */}
         {filteredStops.map((stop) => {
           const accessibility = getAccessibilityInfo(stop.wheelchair_boarding);
           const isRouteStop = selectedRoute && routeStops.some(rs => rs.stop_id === stop.stop_id);
           const stopSequence = isRouteStop ? routeStops.findIndex(rs => rs.stop_id === stop.stop_id) + 1 : null;
+          const isInterchange = stop.location_type === 1;
           
           return (
             <Marker
@@ -403,6 +413,13 @@ export const TransitMap: React.FC<TransitMapProps> = ({
                         <div className="mt-2 flex items-center gap-2">
                           <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                             Stop #{stopSequence} on Route {selectedRouteData?.route_short_name}
+                          </span>
+                        </div>
+                      )}
+                      {isInterchange && !isRouteStop && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            Major Interchange Hub
                           </span>
                         </div>
                       )}
@@ -529,74 +546,107 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         })}
       </MapContainer>
 
-      {/* Route Details Panel */}
+      {/* Enhanced Route Details Panel */}
       {selectedRoute && selectedRouteData && (
-        <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000] max-w-xs border border-gray-200">
-          <div className="flex items-center gap-2 mb-2">
+        <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-4 z-[1000] max-w-sm border border-gray-200">
+          <div className="flex items-center gap-3 mb-3">
             <div 
-              className="w-4 h-4 rounded-full border border-white shadow" 
+              className="w-5 h-5 rounded-full border-2 border-white shadow-lg" 
               style={{ backgroundColor: getRouteColor(selectedRoute) }}
             ></div>
             <div>
-              <span className="text-sm font-bold text-gray-900">
+              <span className="text-lg font-bold text-gray-900">
                 Route {selectedRouteData.route_short_name}
               </span>
               <p className="text-xs text-gray-600 leading-tight">
-                {selectedRouteData.route_long_name.length > 30 
-                  ? `${selectedRouteData.route_long_name.substring(0, 30)}...`
+                {selectedRouteData.route_long_name.length > 40 
+                  ? `${selectedRouteData.route_long_name.substring(0, 40)}...`
                   : selectedRouteData.route_long_name
                 }
               </p>
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="bg-blue-50 rounded p-2 text-center">
-              <div className="font-bold text-blue-900">{routeStops.length}</div>
+          <div className="grid grid-cols-3 gap-3 text-xs">
+            <div className="bg-blue-50 rounded-lg p-3 text-center">
+              <div className="font-bold text-blue-900 text-lg">{routeStops.length}</div>
               <div className="text-blue-700">Stops</div>
             </div>
-            <div className="bg-green-50 rounded p-2 text-center">
-              <div className="font-bold text-green-900">{routeShapes.length > 0 ? Math.round(routeShapes.length / 100) : 0}km</div>
-              <div className="text-green-700">Distance</div>
+            <div className="bg-green-50 rounded-lg p-3 text-center">
+              <div className="font-bold text-green-900 text-lg">{routeTrips.length}</div>
+              <div className="text-green-700">Trips</div>
+            </div>
+            <div className="bg-purple-50 rounded-lg p-3 text-center">
+              <div className="font-bold text-purple-900 text-lg">{routeShapes.length > 0 ? Math.round(routeShapes.length / 100) : 0}km</div>
+              <div className="text-purple-700">Distance</div>
+            </div>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <div className="flex items-center justify-between text-xs text-gray-600">
+              <span>Showing route stops only</span>
+              <span className="text-blue-600 font-medium">Zoomed to fit</span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Legend */}
+      {/* Enhanced Legend */}
       <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-3 z-[1000] border border-gray-200">
         <h4 className="text-xs font-bold text-gray-900 mb-2">Legend</h4>
         <div className="space-y-1 text-xs">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-500 border border-white shadow"></div>
-            <span className="text-gray-700">Stop</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-red-600 border border-white shadow"></div>
-            <span className="text-gray-700">Hub</span>
-          </div>
-          {selectedRoute && (
+          {!selectedRoute ? (
             <>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-blue-600 border border-white shadow"></div>
+                <div className="w-3 h-3 rounded-full bg-green-500 border border-white shadow"></div>
+                <span className="text-gray-700">Bus Stop</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-red-600 border border-white shadow"></div>
+                <span className="text-gray-700">Interchange Hub</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow"></div>
                 <span className="text-gray-700">Route Stop</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-0.5 bg-blue-600 rounded"></div>
-                <span className="text-gray-700">Route Line</span>
+                <div className="w-4 h-4 rounded-full bg-red-600 border-2 border-white shadow"></div>
+                <span className="text-gray-700">Major Hub</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-1 bg-blue-600 rounded"></div>
+                <span className="text-gray-700">Route Path</span>
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Status Indicator */}
+      {/* Enhanced Status Indicator */}
       {selectedRoute && (
-        <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-3 py-1.5 z-[1000] shadow-lg">
-          <div className="flex items-center gap-2 text-xs font-medium">
-            <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-            <span>Route Active • {routeStops.length} stops</span>
+        <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-4 py-2 z-[1000] shadow-lg">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+            <span>Route Focus Mode • {routeStops.length} stops • Zoomed to fit</span>
           </div>
+        </div>
+      )}
+
+      {/* Zoom Reset Button */}
+      {selectedRoute && (
+        <div className="absolute top-16 right-4 z-[1000]">
+          <button
+            onClick={() => {
+              // This will be handled by the parent component
+              window.location.reload(); // Simple reset for now
+            }}
+            className="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg shadow-lg border border-gray-200 text-xs font-medium transition-colors"
+          >
+            Reset View
+          </button>
         </div>
       )}
     </div>
