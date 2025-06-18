@@ -23,6 +23,39 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
   const [timeFilter, setTimeFilter] = useState<'all' | 'morning' | 'afternoon' | 'evening'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // FIXED: Move getFinalDestination function declaration to the top
+  const getFinalDestination = (directionTrips: Trip[], direction: number): string => {
+    if (directionTrips.length === 0) return 'Unknown destination';
+
+    try {
+      const sampleTrip = directionTrips[0];
+      const tripStopTimes = stopTimes
+        .filter(st => st.trip_id === sampleTrip.trip_id)
+        .sort((a, b) => a.stop_sequence - b.stop_sequence);
+
+      if (tripStopTimes.length === 0) return 'Unknown destination';
+
+      const finalStopTime = tripStopTimes[tripStopTimes.length - 1];
+      const finalStop = stops.find(s => s.stop_id === finalStopTime.stop_id);
+
+      if (!finalStop) return 'Unknown destination';
+
+      let destination = finalStop.stop_name
+        .replace(/^(CTRA\.|AV\.|AVDA\.|PLAZA|PZA\.|C\/|CALLE)/i, '')
+        .replace(/-(URB\.|URBANIZACIÓN|COL\.|COLONIA)/i, '')
+        .trim();
+
+      if (destination.length > 30) {
+        const parts = destination.split('-');
+        destination = parts[0].trim();
+      }
+
+      return destination || 'Terminal';
+    } catch (error) {
+      return 'Unknown destination';
+    }
+  };
+
   // Filter stops and routes for search
   const filteredStops = useMemo(() => {
     if (!searchTerm || searchTerm.length < 2) return stops.slice(0, 50);
@@ -71,40 +104,7 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
         tripCount: directionTrips.length
       };
     }).sort((a, b) => a.direction - b.direction);
-  }, [selectedRoute, selectedStop, trips, stopTimes]);
-
-  // Get final destination for direction
-  const getFinalDestination = (directionTrips: Trip[], direction: number): string => {
-    if (directionTrips.length === 0) return 'Unknown destination';
-
-    try {
-      const sampleTrip = directionTrips[0];
-      const tripStopTimes = stopTimes
-        .filter(st => st.trip_id === sampleTrip.trip_id)
-        .sort((a, b) => a.stop_sequence - b.stop_sequence);
-
-      if (tripStopTimes.length === 0) return 'Unknown destination';
-
-      const finalStopTime = tripStopTimes[tripStopTimes.length - 1];
-      const finalStop = stops.find(s => s.stop_id === finalStopTime.stop_id);
-
-      if (!finalStop) return 'Unknown destination';
-
-      let destination = finalStop.stop_name
-        .replace(/^(CTRA\.|AV\.|AVDA\.|PLAZA|PZA\.|C\/|CALLE)/i, '')
-        .replace(/-(URB\.|URBANIZACIÓN|COL\.|COLONIA)/i, '')
-        .trim();
-
-      if (destination.length > 30) {
-        const parts = destination.split('-');
-        destination = parts[0].trim();
-      }
-
-      return destination || 'Terminal';
-    } catch (error) {
-      return 'Unknown destination';
-    }
-  };
+  }, [selectedRoute, selectedStop, trips, stopTimes, getFinalDestination]);
 
   // Only process schedule data when all selections are made (including direction)
   const scheduleData = useMemo(() => {
