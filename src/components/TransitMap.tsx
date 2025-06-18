@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { Icon, LatLngBounds } from 'leaflet';
 import { Stop, Route, Shape, Trip, StopTime } from '../types/gtfs';
-import { MapPin, Bus, Accessibility, Navigation, Info, Clock, ArrowRight, Route as RouteIcon } from 'lucide-react';
+import { MapPin, Bus, Accessibility, Navigation, Info, Clock, ArrowRight, Router as RouteIcon } from 'lucide-react';
 
 interface TransitMapProps {
   stops: Stop[];
