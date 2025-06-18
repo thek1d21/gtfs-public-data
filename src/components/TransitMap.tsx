@@ -301,7 +301,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           routeStops={routeStops}
         />
         
-        {/* Enhanced Route Shapes - Multiple itineraries with different styling */}
+        {/* Fixed Route Shapes - Integrated with road network */}
         {Object.entries(shapeGroups).map(([shapeId, shapePoints], index) => {
           const sortedPoints = shapePoints
             .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
@@ -312,13 +312,15 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           
           return (
             <Polyline
-              key={shapeId}
+              key={`route-${shapeId}`}
               positions={sortedPoints}
               color={baseColor}
-              weight={selectedRoute ? (isMainItinerary ? 8 : 6) : 4}
-              opacity={selectedRoute ? (isMainItinerary ? 0.95 : 0.8) : 0.6}
-              className={selectedRoute ? 'route-highlighted' : ''}
-              dashArray={isMainItinerary ? undefined : '10, 5'}
+              weight={selectedRoute ? (isMainItinerary ? 6 : 4) : 3}
+              opacity={selectedRoute ? 0.9 : 0.6}
+              smoothFactor={1}
+              interactive={false}
+              pane="overlayPane"
+              dashArray={isMainItinerary ? undefined : '8, 4'}
             />
           );
         })}
@@ -326,11 +328,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         {/* Route Stop Connections - Connect stops with lines */}
         {selectedRoute && routeStops.length > 1 && (
           <Polyline
+            key={`connections-${selectedRoute}`}
             positions={routeStops.map(stop => [stop.stop_lat, stop.stop_lon])}
             color={getRouteColor(selectedRoute)}
-            weight={3}
-            opacity={0.6}
-            dashArray="5, 10"
+            weight={2}
+            opacity={0.5}
+            dashArray="4, 8"
+            interactive={false}
+            pane="overlayPane"
           />
         )}
         
@@ -498,49 +503,44 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         })}
       </MapContainer>
 
-      {/* Enhanced Route Control Panel */}
+      {/* Compact Route Details Panel - Bottom Right */}
       {selectedRoute && selectedRouteData && (
-        <div className="absolute top-4 left-4 bg-white rounded-xl shadow-xl p-4 z-[1000] max-w-sm border border-gray-200">
-          <div className="flex items-center gap-3 mb-3">
+        <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-3 z-[1000] max-w-xs border border-gray-200">
+          <div className="flex items-center gap-2 mb-2">
             <div 
-              className="w-6 h-6 rounded-full border-2 border-white shadow-lg" 
+              className="w-4 h-4 rounded-full border border-white shadow" 
               style={{ backgroundColor: getRouteColor(selectedRoute) }}
             ></div>
             <div>
-              <span className="text-lg font-bold text-gray-900">
+              <span className="text-sm font-bold text-gray-900">
                 Route {selectedRouteData.route_short_name}
               </span>
-              <p className="text-sm text-gray-600 mt-1 leading-tight">
-                {selectedRouteData.route_long_name}
+              <p className="text-xs text-gray-600 leading-tight">
+                {selectedRouteData.route_long_name.length > 30 
+                  ? `${selectedRouteData.route_long_name.substring(0, 30)}...`
+                  : selectedRouteData.route_long_name
+                }
               </p>
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="bg-blue-50 rounded-lg p-2">
-              <div className="flex items-center gap-1 mb-1">
-                <MapPin className="w-3 h-3 text-blue-600" />
-                <span className="text-xs font-medium text-blue-900">Stops</span>
-              </div>
-              <p className="text-lg font-bold text-blue-900">{routeStops.length}</p>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-blue-50 rounded p-2 text-center">
+              <div className="font-bold text-blue-900">{routeStops.length}</div>
+              <div className="text-blue-700">Stops</div>
             </div>
-            
-            <div className="bg-green-50 rounded-lg p-2">
-              <div className="flex items-center gap-1 mb-1">
-                <RouteIcon className="w-3 h-3 text-green-600" />
-                <span className="text-xs font-medium text-green-900">Itineraries</span>
-              </div>
-              <p className="text-lg font-bold text-green-900">{itineraryInfo.length}</p>
+            <div className="bg-green-50 rounded p-2 text-center">
+              <div className="font-bold text-green-900">{itineraryInfo.length}</div>
+              <div className="text-green-700">Variants</div>
             </div>
           </div>
           
           {itineraryInfo.length > 0 && (
-            <div className="text-xs text-gray-600">
-              <p className="font-medium mb-1">Route Variants:</p>
+            <div className="mt-2 text-xs text-gray-600">
               {itineraryInfo.map((itinerary, index) => (
-                <div key={index} className="flex items-center gap-2 mb-1">
-                  <div className={`w-2 h-2 rounded-full ${index === 0 ? 'bg-blue-500' : 'bg-blue-300'}`}></div>
-                  <span>Direction {itinerary.direction} ({itinerary.trips} trips)</span>
+                <div key={index} className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${index === 0 ? 'bg-blue-500' : 'bg-blue-300'}`}></div>
+                  <span>Dir {itinerary.direction} ({itinerary.trips})</span>
                 </div>
               ))}
             </div>
@@ -548,43 +548,39 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         </div>
       )}
 
-      {/* Enhanced Legend */}
-      <div className="absolute bottom-4 right-4 bg-white rounded-xl shadow-xl p-4 z-[1000] border border-gray-200">
-        <h4 className="text-sm font-bold text-gray-900 mb-3">Map Legend</h4>
-        <div className="space-y-2 text-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow"></div>
-            <span className="text-gray-700">Regular Stop</span>
+      {/* Compact Legend - Bottom Left */}
+      <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-3 z-[1000] border border-gray-200">
+        <h4 className="text-xs font-bold text-gray-900 mb-2">Legend</h4>
+        <div className="space-y-1 text-xs">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-green-500 border border-white shadow"></div>
+            <span className="text-gray-700">Stop</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-5 h-5 rounded-full bg-red-600 border-2 border-white shadow"></div>
-            <span className="text-gray-700">Interchange Hub</span>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full bg-red-600 border border-white shadow"></div>
+            <span className="text-gray-700">Hub</span>
           </div>
           {selectedRoute && (
             <>
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-blue-600 border-2 border-white shadow"></div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-600 border border-white shadow"></div>
                 <span className="text-gray-700">Route Stop</span>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="w-4 h-1 bg-blue-600 rounded"></div>
-                <span className="text-gray-700">Main Route</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-4 h-1 bg-blue-400 rounded border-dashed border border-blue-600"></div>
-                <span className="text-gray-700">Route Variant</span>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-0.5 bg-blue-600 rounded"></div>
+                <span className="text-gray-700">Route</span>
               </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Route Status Indicator */}
+      {/* Route Status Indicator - Top Right */}
       {selectedRoute && (
-        <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-3 py-2 z-[1000] shadow-lg">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-            <span>Route Highlighted & Zoomed</span>
+        <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-3 py-1.5 z-[1000] shadow-lg">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+            <span>Route Active</span>
           </div>
         </div>
       )}

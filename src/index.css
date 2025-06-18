@@ -87,27 +87,13 @@ body {
   animation: fadeIn 0.3s ease-out;
 }
 
-/* Enhanced route highlighting animation */
-.route-highlighted {
-  animation: routePulse 3s ease-in-out infinite;
-  filter: drop-shadow(0 0 8px rgba(0, 102, 204, 0.6));
+/* Fixed route highlighting - no glitch effects */
+.leaflet-overlay-pane svg {
+  pointer-events: none;
 }
 
-@keyframes routePulse {
-  0%, 100% { 
-    opacity: 0.95; 
-    filter: drop-shadow(0 0 8px rgba(0, 102, 204, 0.6));
-  }
-  50% { 
-    opacity: 0.8; 
-    filter: drop-shadow(0 0 12px rgba(0, 102, 204, 0.8));
-  }
-}
-
-/* Enhanced map controls */
-.map-control-panel {
-  backdrop-filter: blur(10px);
-  background-color: rgba(255, 255, 255, 0.95);
+.leaflet-interactive {
+  pointer-events: auto;
 }
 
 /* Enhanced next arrivals styling */
@@ -185,42 +171,18 @@ body {
 
 /* Enhanced stop markers with better visibility */
 .leaflet-marker-icon {
-  transition: all 0.3s ease-in-out;
+  transition: all 0.2s ease-in-out;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
 }
 
 .leaflet-marker-icon:hover {
-  transform: scale(1.15);
+  transform: scale(1.1);
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
 }
 
-/* Route stop highlighting with enhanced glow */
-.route-stop-marker {
-  filter: drop-shadow(0 0 12px rgba(0, 168, 230, 0.8));
-  animation: stopGlow 2s ease-in-out infinite;
-}
-
-@keyframes stopGlow {
-  0%, 100% { 
-    filter: drop-shadow(0 0 12px rgba(0, 168, 230, 0.8));
-  }
-  50% { 
-    filter: drop-shadow(0 0 16px rgba(0, 168, 230, 1));
-  }
-}
-
-/* Enhanced map zoom animation */
+/* Fixed map zoom animation */
 .leaflet-zoom-animated {
-  transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Route connection lines styling */
-.leaflet-interactive {
-  cursor: pointer;
-}
-
-.leaflet-interactive:hover {
-  filter: brightness(1.1);
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Responsive text */
@@ -259,14 +221,4 @@ body {
 
 .custom-popup .leaflet-popup-content::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
-}
-
-/* Enhanced route highlighting for different itineraries */
-.route-variant {
-  animation: variantPulse 4s ease-in-out infinite;
-}
-
-@keyframes variantPulse {
-  0%, 100% { opacity: 0.8; }
-  50% { opacity: 0.6; }
 }
