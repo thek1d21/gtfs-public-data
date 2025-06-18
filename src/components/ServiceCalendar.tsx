@@ -22,15 +22,13 @@ interface DaySchedule {
   scheduleType: 'weekday' | 'saturday' | 'sunday' | 'holiday';
 }
 
-interface DepartureInfo {
+interface SimplifiedDeparture {
   time: string;
-  route: Route;
-  trip: Trip;
   direction: number;
   directionLabel: string;
   finalDestination: string;
-  stopSequence: number;
-  stopName: string;
+  tripId: string;
+  startingStopName: string;
 }
 
 export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
@@ -136,8 +134,8 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
       .sort((a, b) => a.route_short_name.localeCompare(b.route_short_name));
   }, [selectedDate, calendar, trips, routes]);
 
-  // Get departures for selected date and route
-  const getDeparturesForDateAndRoute = (date: Date, routeId: string): DepartureInfo[] => {
+  // SIMPLIFIED: Get only starting point departures for selected date and route
+  const getSimplifiedDepartures = (date: Date, routeId: string): SimplifiedDeparture[] => {
     try {
       const activeServices = calendar.filter(service => isServiceActiveOnDate(service, date));
       const serviceIds = activeServices.map(s => s.service_id);
@@ -157,46 +155,65 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
         st.departure_time // Only include times with departure
       );
       
-      // Convert to departure info with stop names
-      const departures: DepartureInfo[] = dayStopTimes
-        .map(st => {
-          const trip = dayTrips.find(t => t.trip_id === st.trip_id);
-          const route = routes.find(r => r.route_id === routeId);
-          const stop = stops.find(s => s.stop_id === st.stop_id);
+      // Group by trip to find starting points
+      const tripStartingPoints = new Map<string, {
+        trip: Trip;
+        startingStopTime: StopTime;
+        startingStop: Stop;
+      }>();
+      
+      dayTrips.forEach(trip => {
+        const tripStopTimes = dayStopTimes
+          .filter(st => st.trip_id === trip.trip_id)
+          .sort((a, b) => a.stop_sequence - b.stop_sequence);
+        
+        if (tripStopTimes.length > 0) {
+          const startingStopTime = tripStopTimes[0]; // First stop in sequence
+          const startingStop = stops.find(s => s.stop_id === startingStopTime.stop_id);
           
-          if (!trip || !route || !stop) return null;
-          
+          if (startingStop) {
+            tripStartingPoints.set(trip.trip_id, {
+              trip,
+              startingStopTime,
+              startingStop
+            });
+          }
+        }
+      });
+      
+      // Convert to simplified departures
+      const departures: SimplifiedDeparture[] = Array.from(tripStartingPoints.values())
+        .map(({ trip, startingStopTime, startingStop }) => {
           const directionLabel = trip.direction_id === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
-          const finalDestination = getFinalDestination(route.route_id, trip.direction_id, st.stop_id);
+          const finalDestination = getFinalDestination(routeId, trip.direction_id);
           
           return {
-            time: st.departure_time,
-            route,
-            trip,
+            time: startingStopTime.departure_time,
             direction: trip.direction_id,
             directionLabel,
             finalDestination,
-            stopSequence: st.stop_sequence,
-            stopName: stop.stop_name
+            tripId: trip.trip_id,
+            startingStopName: startingStop.stop_name
           };
         })
-        .filter(Boolean) as DepartureInfo[];
+        .filter(departure => departure.time) // Ensure we have departure time
+        .sort((a, b) => {
+          // Sort by direction first, then by time
+          if (a.direction !== b.direction) {
+            return a.direction - b.direction;
+          }
+          return a.time.localeCompare(b.time);
+        });
       
-      // Sort by stop sequence, then by departure time
-      return departures.sort((a, b) => {
-        if (a.stopSequence !== b.stopSequence) {
-          return a.stopSequence - b.stopSequence;
-        }
-        return a.time.localeCompare(b.time);
-      });
+      return departures;
     } catch (error) {
-      console.error('Error getting departures:', error);
+      console.error('Error getting simplified departures:', error);
       return [];
     }
   };
 
-  // Get final destination for a route direction
-  const getFinalDestination = (routeId: string, direction: number, fromStopId: string): string => {
+  // Get final destination for a route direction (simplified)
+  const getFinalDestination = (routeId: string, direction: number): string => {
     try {
       const routeTrips = trips.filter(trip => 
         trip.route_id === routeId && 
@@ -222,7 +239,7 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
         .replace(/-(URB\.|URBANIZACIÓN|COL\.|COLONIA)/i, '')
         .trim();
 
-      if (destination.length > 25) {
+      if (destination.length > 30) {
         const parts = destination.split('-');
         destination = parts[0].trim();
       }
@@ -321,21 +338,21 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
 
   const selectedDateData = selectedDate ? monthData.find(d => isSameDay(d.date, selectedDate)) : null;
   const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
-  const departures = selectedDate && selectedRoute ? getDeparturesForDateAndRoute(selectedDate, selectedRoute) : [];
+  const simplifiedDepartures = selectedDate && selectedRoute ? getSimplifiedDepartures(selectedDate, selectedRoute) : [];
 
-  // Group departures by direction
+  // Group simplified departures by direction
   const departuresByDirection = useMemo(() => {
-    const grouped = departures.reduce((acc, departure) => {
+    const grouped = simplifiedDepartures.reduce((acc, departure) => {
       const key = departure.direction;
       if (!acc[key]) {
         acc[key] = [];
       }
       acc[key].push(departure);
       return acc;
-    }, {} as Record<number, DepartureInfo[]>);
+    }, {} as Record<number, SimplifiedDeparture[]>);
 
     return grouped;
-  }, [departures]);
+  }, [simplifiedDepartures]);
 
   return (
     <div className="space-y-6">
@@ -574,13 +591,13 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
           </div>
         )}
 
-        {/* Step 3: View Departures */}
+        {/* Step 3: View Simplified Departures */}
         {step === 'viewDepartures' && selectedDate && selectedRoute && selectedRouteData && (
           <div className="space-y-6">
             <div className="text-center">
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">Step 3: Departures</h4>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Step 3: Starting Point Departures</h4>
               <p className="text-gray-600">
-                All departures for Route <strong>{selectedRouteData.route_short_name}</strong> on <strong>{format(selectedDate, 'EEEE, MMMM d')}</strong>
+                All departures from starting points for Route <strong>{selectedRouteData.route_short_name}</strong> on <strong>{format(selectedDate, 'EEEE, MMMM d')}</strong>
               </p>
             </div>
 
@@ -597,13 +614,20 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-bold text-green-600">{departures.length}</div>
-                  <div className="text-sm text-green-700">Total Departures</div>
+                  <div className="text-2xl font-bold text-green-600">{simplifiedDepartures.length}</div>
+                  <div className="text-sm text-green-700">Starting Point Departures</div>
                 </div>
+              </div>
+              
+              <div className="mt-3 p-3 bg-white rounded-lg">
+                <p className="text-sm text-green-800">
+                  <strong>📍 Simplified View:</strong> Showing only departures from route starting points with destination information. 
+                  This provides the essential information users need to plan their journey.
+                </p>
               </div>
             </div>
 
-            {/* Departures by Direction */}
+            {/* Simplified Departures by Direction */}
             {Object.keys(departuresByDirection).length > 0 ? (
               <div className="space-y-6">
                 {Object.entries(departuresByDirection).map(([direction, directionDepartures]) => {
@@ -622,26 +646,42 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
                           </p>
                         </div>
                         <div className="text-sm text-gray-600">
-                          {directionDepartures.length} departures
+                          {directionDepartures.length} departures from starting point
                         </div>
                       </div>
 
-                      <div className="grid gap-2">
+                      <div className="grid gap-3">
                         {directionDepartures.map((departure, index) => (
-                          <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                            <div className="flex items-center gap-4">
-                              <div className="text-lg font-bold text-madrid-primary">
-                                {formatTime(departure.time)}
-                              </div>
-                              <div>
-                                <div className="font-medium text-gray-900">{departure.stopName}</div>
-                                <div className="text-sm text-gray-600">
-                                  Stop #{departure.stopSequence} • Trip: {departure.trip.trip_id.slice(-6)}
+                          <div key={index} className="p-4 bg-white rounded-lg border border-gray-200 hover:border-madrid-primary/50 transition-all shadow-sm">
+                            <div className="flex items-center justify-between">
+                              {/* Departure Time & Starting Point */}
+                              <div className="flex items-center gap-4">
+                                <div className="text-center">
+                                  <div className="text-2xl font-bold text-madrid-primary">
+                                    {formatTime(departure.time)}
+                                  </div>
+                                  <div className="text-xs text-gray-500">Departure</div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <MapPin className="w-4 h-4 text-gray-500" />
+                                  <div>
+                                    <div className="font-medium text-gray-900">{departure.startingStopName}</div>
+                                    <div className="text-sm text-gray-600">Starting Point</div>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <div className="text-right text-sm text-gray-600">
-                              <div>→ {departure.finalDestination}</div>
+                              
+                              {/* Destination */}
+                              <div className="text-right">
+                                <div className="flex items-center gap-2 justify-end mb-1">
+                                  <ArrowRight className="w-4 h-4 text-gray-400" />
+                                  <div className="font-medium text-gray-900">{departure.finalDestination}</div>
+                                </div>
+                                <div className="text-sm text-gray-600">Final Destination</div>
+                                <div className="text-xs text-gray-500 mt-1">
+                                  Trip: {departure.tripId.slice(-6)}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         ))}
