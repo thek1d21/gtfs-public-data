@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNotifications } from '../contexts/NotificationContext';
 import { Notification } from '../types/notifications';
-import { Plus, Edit, Trash2, Bell, Settings, Save, X, Calendar, Clock, Bus, Navigation, MapPin, Globe, Eye, EyeOff } from 'lucide-react';
+import { Plus, Edit, Trash2, Bell, Settings, Save, X, Calendar, Clock, Bus, Navigation, MapPin, Globe, Eye, EyeOff, AlertCircle, CheckCircle, Info } from 'lucide-react';
 
 export const NotificationManager: React.FC = () => {
   const { notifications, addNotification, updateNotification, removeNotification } = useNotifications();
@@ -94,7 +94,7 @@ export const NotificationManager: React.FC = () => {
   const getScopeDescription = (notification: Notification) => {
     switch (notification.scope) {
       case 'global':
-        return 'Shows on all pages';
+        return 'Shows on all pages and all routes';
       case 'page':
         return `Shows on: ${notification.targetPages?.join(', ') || 'No pages selected'}`;
       case 'route':
@@ -108,68 +108,128 @@ export const NotificationManager: React.FC = () => {
     }
   };
 
+  const getAffectedAreas = (notification: Notification) => {
+    const areas = [];
+    
+    if (notification.scope === 'global') {
+      areas.push('🌍 All pages', '🚌 All routes', '🗺️ Map view', '📅 Schedules', '🧭 Journey planner');
+    } else {
+      if (notification.scope === 'page' && notification.targetPages) {
+        areas.push(...notification.targetPages.map(page => `📄 ${page.charAt(0).toUpperCase() + page.slice(1)} page`));
+      }
+      if (notification.scope === 'route' && notification.targetRoutes) {
+        areas.push(...notification.targetRoutes.map(route => `🚌 Route ${route}`));
+      }
+      if (notification.showOnMap) areas.push('🗺️ Map view');
+      if (notification.showInSchedules) areas.push('📅 Schedule view');
+      if (notification.showInPlanner) areas.push('🧭 Journey planner');
+    }
+    
+    return areas;
+  };
+
   // Debug: Log current notifications
   console.log('🔍 Current notifications in manager:', notifications);
 
   return (
-    <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-50 rounded-lg">
-            <Bell className="w-6 h-6 text-blue-600" />
+    <div className="space-y-6">
+      {/* Header Section */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-50 rounded-lg">
+              <Bell className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Notification Center</h3>
+              <p className="text-sm text-gray-600">
+                Manage system-wide alerts and warnings • {notifications.length} total notifications
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Notification Manager</h3>
-            <p className="text-sm text-gray-600">
-              Manage warnings and alerts • {notifications.length} total notifications
-            </p>
-          </div>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Notification
+          </button>
         </div>
-        <button
-          onClick={() => setIsCreating(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Notification
-        </button>
-      </div>
 
-      {/* Debug Info */}
-      <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-        <h4 className="text-sm font-semibold text-gray-700 mb-2">🔍 Debug Information</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <span className="text-gray-600">Total Notifications:</span>
-            <span className="ml-2 font-medium text-gray-900">{notifications.length}</span>
+        {/* System Status */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Bell className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-medium text-blue-900">Total</span>
+            </div>
+            <div className="text-2xl font-bold text-blue-900">{notifications.length}</div>
+            <div className="text-xs text-blue-700">All notifications</div>
           </div>
-          <div>
-            <span className="text-gray-600">Active Notifications:</span>
-            <span className="ml-2 font-medium text-green-600">
+          
+          <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg border border-green-200">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="w-4 h-4 text-green-600" />
+              <span className="text-sm font-medium text-green-900">Active</span>
+            </div>
+            <div className="text-2xl font-bold text-green-900">
               {notifications.filter(n => n.isActive).length}
-            </span>
+            </div>
+            <div className="text-xs text-green-700">Currently showing</div>
           </div>
-          <div>
-            <span className="text-gray-600">Storage:</span>
-            <span className="ml-2 font-medium text-blue-600">localStorage</span>
+          
+          <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Globe className="w-4 h-4 text-purple-600" />
+              <span className="text-sm font-medium text-purple-900">Global</span>
+            </div>
+            <div className="text-2xl font-bold text-purple-900">
+              {notifications.filter(n => n.scope === 'global').length}
+            </div>
+            <div className="text-xs text-purple-700">System-wide alerts</div>
+          </div>
+          
+          <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-4 rounded-lg border border-orange-200">
+            <div className="flex items-center gap-2 mb-2">
+              <Bus className="w-4 h-4 text-orange-600" />
+              <span className="text-sm font-medium text-orange-900">Route-Specific</span>
+            </div>
+            <div className="text-2xl font-bold text-orange-900">
+              {notifications.filter(n => n.scope === 'route').length}
+            </div>
+            <div className="text-xs text-orange-700">Route alerts</div>
           </div>
         </div>
-        <div className="mt-2 text-xs text-gray-500">
-          Notifications are stored in your browser's localStorage and will persist between sessions.
+
+        {/* How It Works */}
+        <div className="mt-6 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border border-gray-200">
+          <h4 className="text-sm font-semibold text-gray-900 mb-2">📋 How Notifications Work</h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
+            <div>
+              <strong>🌍 Global:</strong> Shows everywhere - all pages, all routes, map view
+            </div>
+            <div>
+              <strong>📄 Page-Specific:</strong> Shows only on selected pages (Schedule, Planner, etc.)
+            </div>
+            <div>
+              <strong>🚌 Route-Specific:</strong> Shows when that route is selected or viewed
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Create/Edit Form */}
       {isCreating && (
-        <div className="mb-6 p-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-blue-900">
+            <h4 className="text-lg font-semibold text-gray-900">
               {editingId ? '✏️ Edit Notification' : '➕ Create New Notification'}
             </h4>
             <button
               onClick={resetForm}
-              className="p-2 hover:bg-blue-100 rounded-lg transition-colors"
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <X className="w-4 h-4 text-blue-600" />
+              <X className="w-4 h-4 text-gray-600" />
             </button>
           </div>
 
@@ -242,7 +302,7 @@ export const NotificationManager: React.FC = () => {
                   onChange={(e) => setFormData(prev => ({ ...prev, scope: e.target.value as Notification['scope'] }))}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="global">🌍 Global (All pages)</option>
+                  <option value="global">🌍 Global (Shows everywhere)</option>
                   <option value="page">📄 Specific Pages</option>
                   <option value="route">🚌 Specific Routes</option>
                   <option value="direction">🧭 Route Directions</option>
@@ -330,50 +390,8 @@ export const NotificationManager: React.FC = () => {
                   />
                   <span className="text-sm">⏰ Auto Hide</span>
                 </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.showOnMap || false}
-                    onChange={(e) => setFormData(prev => ({ ...prev, showOnMap: e.target.checked }))}
-                    className="rounded border-gray-300"
-                  />
-                  <span className="text-sm">🗺️ Show on Map</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.showInSchedules || false}
-                    onChange={(e) => setFormData(prev => ({ ...prev, showInSchedules: e.target.checked }))}
-                    className="rounded border-gray-300"
-                  />
-                  <span className="text-sm">📅 Show in Schedules</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={formData.showInPlanner || false}
-                    onChange={(e) => setFormData(prev => ({ ...prev, showInPlanner: e.target.checked }))}
-                    className="rounded border-gray-300"
-                  />
-                  <span className="text-sm">🧭 Show in Planner</span>
-                </label>
               </div>
             </div>
-
-            {/* Auto Hide Delay */}
-            {formData.autoHide && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Auto Hide Delay (seconds)</label>
-                <input
-                  type="number"
-                  value={formData.autoHideDelay || 5}
-                  onChange={(e) => setFormData(prev => ({ ...prev, autoHideDelay: parseInt(e.target.value) }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  min="1"
-                  max="60"
-                />
-              </div>
-            )}
 
             {/* Submit Buttons */}
             <div className="flex items-center gap-3 pt-4">
@@ -397,8 +415,8 @@ export const NotificationManager: React.FC = () => {
       )}
 
       {/* Notifications List */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-6">
           <h4 className="text-lg font-semibold text-gray-900">
             📋 All Notifications ({notifications.length})
           </h4>
@@ -423,21 +441,22 @@ export const NotificationManager: React.FC = () => {
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {notifications.map(notification => {
               const ScopeIcon = getScopeIcon(notification.scope);
+              const affectedAreas = getAffectedAreas(notification);
               
               return (
-                <div key={notification.id} className={`p-4 rounded-lg border transition-all ${
+                <div key={notification.id} className={`p-6 rounded-lg border transition-all ${
                   notification.isActive 
                     ? 'bg-white border-gray-200 shadow-sm' 
                     : 'bg-gray-50 border-gray-300 opacity-75'
                 }`}>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <ScopeIcon className="w-4 h-4 text-gray-600" />
-                        <h5 className="font-semibold text-gray-900">{notification.title}</h5>
+                      <div className="flex items-center gap-3 mb-3">
+                        <ScopeIcon className="w-5 h-5 text-gray-600" />
+                        <h5 className="text-lg font-semibold text-gray-900">{notification.title}</h5>
                         
                         {/* Status Badges */}
                         <div className="flex items-center gap-2">
@@ -475,14 +494,22 @@ export const NotificationManager: React.FC = () => {
                         </div>
                       </div>
                       
-                      <p className="text-gray-700 mb-2">{notification.message}</p>
+                      <p className="text-gray-700 mb-4 text-base leading-relaxed">{notification.message}</p>
+                      
+                      {/* Affected Areas */}
+                      <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <h6 className="text-sm font-semibold text-blue-900 mb-2">📍 Where This Notification Appears:</h6>
+                        <div className="flex flex-wrap gap-2">
+                          {affectedAreas.map((area, index) => (
+                            <span key={index} className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                              {area}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                       
                       <div className="text-xs text-gray-500 space-y-1">
-                        <div>📍 {getScopeDescription(notification)}</div>
-                        <div>
-                          📅 Created: {notification.createdAt.toLocaleDateString()} • 
-                          Updated: {notification.updatedAt.toLocaleDateString()}
-                        </div>
+                        <div>📅 Created: {notification.createdAt.toLocaleDateString()} • Updated: {notification.updatedAt.toLocaleDateString()}</div>
                         <div>
                           🎛️ Settings: 
                           {notification.dismissible && ' Dismissible'}
@@ -494,7 +521,7 @@ export const NotificationManager: React.FC = () => {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-2 ml-6">
                       <button
                         onClick={() => toggleNotificationActive(notification)}
                         className={`p-2 rounded-lg transition-colors ${
@@ -504,21 +531,21 @@ export const NotificationManager: React.FC = () => {
                         }`}
                         title={notification.isActive ? 'Deactivate notification' : 'Activate notification'}
                       >
-                        {notification.isActive ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                        {notification.isActive ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
                       </button>
                       <button
                         onClick={() => handleEdit(notification)}
                         className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="Edit notification"
                       >
-                        <Edit className="w-4 h-4" />
+                        <Edit className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => handleDelete(notification.id)}
                         className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Delete notification"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   </div>

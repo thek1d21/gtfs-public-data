@@ -140,11 +140,27 @@ function AppContent() {
 
   const feedInfo = data.feedInfo[0];
 
-  // Get notifications for current page
-  const pageNotifications = getNotificationsForPage(activeTab);
-  
-  // Get notifications for selected route
-  const routeNotifications = selectedRoute ? getNotificationsForRoute(selectedRoute) : [];
+  // FIXED: Get notifications based on current context
+  const getRelevantNotifications = () => {
+    // Always get global notifications
+    const globalNotifications = getNotificationsForPage('global');
+    
+    // Get page-specific notifications (but not for overview)
+    const pageNotifications = activeTab !== 'overview' ? getNotificationsForPage(activeTab) : [];
+    
+    // Get route-specific notifications only if a route is selected
+    const routeNotifications = selectedRoute ? getNotificationsForRoute(selectedRoute) : [];
+    
+    // Combine and deduplicate
+    const allNotifications = [...globalNotifications, ...pageNotifications, ...routeNotifications];
+    const uniqueNotifications = allNotifications.filter((notification, index, self) => 
+      index === self.findIndex(n => n.id === notification.id)
+    );
+    
+    return uniqueNotifications;
+  };
+
+  const relevantNotifications = getRelevantNotifications();
 
   const renderContent = () => {
     switch (activeTab) {
@@ -288,23 +304,28 @@ function AppContent() {
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Page-level Notifications */}
-        {pageNotifications.length > 0 && (
+        {/* FIXED: Smart Notification Display */}
+        {relevantNotifications.length > 0 && (
           <div className="mb-6">
             <NotificationBanner
-              notifications={pageNotifications}
+              notifications={relevantNotifications}
               onDismiss={dismissNotification}
             />
-          </div>
-        )}
-
-        {/* Route-level Notifications */}
-        {routeNotifications.length > 0 && (
-          <div className="mb-6">
-            <NotificationBanner
-              notifications={routeNotifications}
-              onDismiss={dismissNotification}
-            />
+            <div className="mt-2 text-xs text-gray-500 text-center">
+              {selectedRoute && (
+                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full mr-2">
+                  Route {data.routes.find(r => r.route_id === selectedRoute)?.route_short_name} notifications included
+                </span>
+              )}
+              {activeTab !== 'overview' && (
+                <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full mr-2">
+                  {activeTab} page notifications included
+                </span>
+              )}
+              <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
+                Global notifications included
+              </span>
+            </div>
           </div>
         )}
 
