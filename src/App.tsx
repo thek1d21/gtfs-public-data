@@ -150,6 +150,10 @@ function App() {
           <ServiceCalendar
             calendar={data.calendar}
             servicePatterns={data.servicePatterns}
+            stops={data.stops}
+            routes={data.routes}
+            trips={data.trips}
+            stopTimes={data.stopTimes}
           />
         );
       case 'planner':
