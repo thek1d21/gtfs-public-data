@@ -34,6 +34,15 @@ interface JourneyResult {
   transferStops?: Stop[];
 }
 
+// NEW: Stop consolidation interface for handling direction-specific stops
+interface ConsolidatedStop {
+  baseLocation: string; // Base name without direction indicators
+  physicalStops: Stop[]; // All stops at this physical location
+  coordinates: { lat: number; lon: number }; // Average coordinates
+  zone: string;
+  accessibility: number;
+}
+
 export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   stops,
   routes,
@@ -52,129 +61,138 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   const [showFromDropdown, setShowFromDropdown] = useState<boolean>(false);
   const [showToDropdown, setShowToDropdown] = useState<boolean>(false);
 
-  // Enhanced stop filtering with better search
+  // NEW: Consolidate stops by physical location
+  const consolidatedStops = useMemo(() => {
+    const stopGroups = new Map<string, Stop[]>();
+    
+    stops.forEach(stop => {
+      // Create base location key by removing direction indicators and normalizing
+      let baseLocation = stop.stop_name
+        .replace(/\s*-\s*(IDA|VUELTA|INBOUND|OUTBOUND|A|B|1|2)$/i, '') // Remove direction suffixes
+        .replace(/\s*\((IDA|VUELTA|INBOUND|OUTBOUND|A|B|1|2)\)$/i, '') // Remove direction in parentheses
+        .replace(/\s+/g, ' ') // Normalize spaces
+        .trim()
+        .toUpperCase();
+      
+      // Also check for stops with very similar coordinates (within 50m)
+      let foundGroup = false;
+      for (const [existingBase, existingStops] of stopGroups.entries()) {
+        const avgLat = existingStops.reduce((sum, s) => sum + s.stop_lat, 0) / existingStops.length;
+        const avgLon = existingStops.reduce((sum, s) => sum + s.stop_lon, 0) / existingStops.length;
+        
+        const distance = calculateDistance(
+          { stop_lat: avgLat, stop_lon: avgLon } as Stop,
+          stop
+        );
+        
+        // If within 50m and similar name, group together
+        if (distance < 0.05 && (
+          existingBase.includes(baseLocation.substring(0, 10)) || 
+          baseLocation.includes(existingBase.substring(0, 10))
+        )) {
+          existingStops.push(stop);
+          foundGroup = true;
+          break;
+        }
+      }
+      
+      if (!foundGroup) {
+        if (!stopGroups.has(baseLocation)) {
+          stopGroups.set(baseLocation, []);
+        }
+        stopGroups.get(baseLocation)!.push(stop);
+      }
+    });
+
+    // Convert to consolidated stops
+    const consolidated: ConsolidatedStop[] = [];
+    stopGroups.forEach((physicalStops, baseLocation) => {
+      if (physicalStops.length > 0) {
+        const avgLat = physicalStops.reduce((sum, s) => sum + s.stop_lat, 0) / physicalStops.length;
+        const avgLon = physicalStops.reduce((sum, s) => sum + s.stop_lon, 0) / physicalStops.length;
+        const bestAccessibility = Math.max(...physicalStops.map(s => s.wheelchair_boarding));
+        
+        consolidated.push({
+          baseLocation,
+          physicalStops,
+          coordinates: { lat: avgLat, lon: avgLon },
+          zone: physicalStops[0].zone_id,
+          accessibility: bestAccessibility
+        });
+      }
+    });
+
+    console.log(`🏢 Consolidated ${stops.length} stops into ${consolidated.length} physical locations`);
+    return consolidated;
+  }, [stops]);
+
+  // Enhanced stop filtering with consolidated stops
   const filteredFromStops = useMemo(() => {
     if (!searchFromTerm || searchFromTerm.length < 2) return [];
     
-    return stops.filter(stop => 
-      stop.stop_name.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
-      stop.stop_code.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
-      stop.stop_id.toLowerCase().includes(searchFromTerm.toLowerCase())
-    )
-    .sort((a, b) => {
-      // Prioritize exact matches and shorter names
-      const aExact = a.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
-      const bExact = b.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
-      if (aExact !== bExact) return aExact - bExact;
-      return a.stop_name.length - b.stop_name.length;
-    })
-    .slice(0, 15);
-  }, [stops, searchFromTerm]);
+    const matchingConsolidated = consolidatedStops.filter(consolidated => 
+      consolidated.baseLocation.includes(searchFromTerm.toUpperCase()) ||
+      consolidated.physicalStops.some(stop => 
+        stop.stop_name.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
+        stop.stop_code.toLowerCase().includes(searchFromTerm.toLowerCase())
+      )
+    );
+
+    // Flatten to individual stops but prioritize by consolidated location
+    const results: Stop[] = [];
+    matchingConsolidated.forEach(consolidated => {
+      // Add the "best" stop from each location (prefer interchange, then accessibility)
+      const bestStop = consolidated.physicalStops.sort((a, b) => {
+        if (a.location_type !== b.location_type) return b.location_type - a.location_type;
+        if (a.wheelchair_boarding !== b.wheelchair_boarding) return b.wheelchair_boarding - a.wheelchair_boarding;
+        return a.stop_name.length - b.stop_name.length; // Prefer shorter names
+      })[0];
+      
+      results.push(bestStop);
+    });
+
+    return results
+      .sort((a, b) => {
+        const aExact = a.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
+        const bExact = b.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
+        return a.stop_name.length - b.stop_name.length;
+      })
+      .slice(0, 15);
+  }, [consolidatedStops, searchFromTerm]);
 
   const filteredToStops = useMemo(() => {
     if (!searchToTerm || searchToTerm.length < 2) return [];
     
-    return stops.filter(stop => 
-      stop.stop_id !== fromStopId && // Exclude selected from stop
-      (stop.stop_name.toLowerCase().includes(searchToTerm.toLowerCase()) ||
-       stop.stop_code.toLowerCase().includes(searchToTerm.toLowerCase()) ||
-       stop.stop_id.toLowerCase().includes(searchToTerm.toLowerCase()))
-    )
-    .sort((a, b) => {
-      const aExact = a.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
-      const bExact = b.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
-      if (aExact !== bExact) return aExact - bExact;
-      return a.stop_name.length - b.stop_name.length;
-    })
-    .slice(0, 15);
-  }, [stops, searchToTerm, fromStopId]);
+    const matchingConsolidated = consolidatedStops.filter(consolidated => 
+      !consolidated.physicalStops.some(s => s.stop_id === fromStopId) && // Exclude selected from location
+      (consolidated.baseLocation.includes(searchToTerm.toUpperCase()) ||
+       consolidated.physicalStops.some(stop => 
+         stop.stop_name.toLowerCase().includes(searchToTerm.toLowerCase()) ||
+         stop.stop_code.toLowerCase().includes(searchToTerm.toLowerCase())
+       ))
+    );
 
-  // ENHANCED route-stop mappings with DIRECTION AWARENESS
-  const routeStopMappings = useMemo(() => {
-    console.log('🔄 Building DIRECTION-AWARE route-stop network...');
-    
-    // Maps: route_id -> direction -> ordered stop sequences
-    const routeDirectionStops = new Map<string, Map<number, StopTime[]>>();
-    // Maps: stop_id -> routes serving it with directions
-    const stopRouteDirections = new Map<string, Array<{routeId: string, direction: number}>>();
-    // Maps: trip_id -> sorted stop times
-    const tripStopSequences = new Map<string, StopTime[]>();
-    
-    // Build trip stop sequences first
-    stopTimes.forEach(st => {
-      if (!tripStopSequences.has(st.trip_id)) {
-        tripStopSequences.set(st.trip_id, []);
-      }
-      tripStopSequences.get(st.trip_id)!.push(st);
-    });
-
-    // Sort stop times by sequence for each trip
-    tripStopSequences.forEach((stopTimes, tripId) => {
-      stopTimes.sort((a, b) => a.stop_sequence - b.stop_sequence);
-    });
-
-    // Build direction-aware route mappings
-    trips.forEach(trip => {
-      const tripSTs = tripStopSequences.get(trip.trip_id) || [];
+    const results: Stop[] = [];
+    matchingConsolidated.forEach(consolidated => {
+      const bestStop = consolidated.physicalStops.sort((a, b) => {
+        if (a.location_type !== b.location_type) return b.location_type - a.location_type;
+        if (a.wheelchair_boarding !== b.wheelchair_boarding) return b.wheelchair_boarding - a.wheelchair_boarding;
+        return a.stop_name.length - b.stop_name.length;
+      })[0];
       
-      if (tripSTs.length === 0) return;
-
-      // Initialize route direction mapping
-      if (!routeDirectionStops.has(trip.route_id)) {
-        routeDirectionStops.set(trip.route_id, new Map());
-      }
-      
-      const routeMap = routeDirectionStops.get(trip.route_id)!;
-      if (!routeMap.has(trip.direction_id)) {
-        routeMap.set(trip.direction_id, []);
-      }
-
-      // Add stop times for this direction (merge with existing)
-      const directionStops = routeMap.get(trip.direction_id)!;
-      tripSTs.forEach(st => {
-        // Only add if not already present (avoid duplicates)
-        if (!directionStops.some(existing => existing.stop_id === st.stop_id)) {
-          directionStops.push(st);
-        }
-      });
-
-      // Update stop-route mappings
-      tripSTs.forEach(st => {
-        if (!stopRouteDirections.has(st.stop_id)) {
-          stopRouteDirections.set(st.stop_id, []);
-        }
-        
-        const stopRoutes = stopRouteDirections.get(st.stop_id)!;
-        if (!stopRoutes.some(sr => sr.routeId === trip.route_id && sr.direction === trip.direction_id)) {
-          stopRoutes.push({ routeId: trip.route_id, direction: trip.direction_id });
-        }
-      });
+      results.push(bestStop);
     });
 
-    // Sort direction stops by sequence
-    routeDirectionStops.forEach((directionMap) => {
-      directionMap.forEach((stopTimes) => {
-        stopTimes.sort((a, b) => a.stop_sequence - b.stop_sequence);
-      });
-    });
-
-    console.log(`✅ Direction-aware network built:`);
-    console.log(`📊 Routes with directions: ${routeDirectionStops.size}`);
-    console.log(`📊 Stops with route directions: ${stopRouteDirections.size}`);
-    
-    // Log sample data
-    const sampleRoute = Array.from(routeDirectionStops.entries())[0];
-    if (sampleRoute) {
-      const [routeId, dirMap] = sampleRoute;
-      console.log(`📍 Sample route ${routeId}:`, Array.from(dirMap.entries()).map(([dir, stops]) => `Dir ${dir}: ${stops.length} stops`));
-    }
-    
-    return { 
-      routeDirectionStops, 
-      stopRouteDirections, 
-      tripStopSequences 
-    };
-  }, [trips, stopTimes]);
+    return results
+      .sort((a, b) => {
+        const aExact = a.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
+        const bExact = b.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
+        return a.stop_name.length - b.stop_name.length;
+      })
+      .slice(0, 15);
+  }, [consolidatedStops, searchToTerm, fromStopId]);
 
   // Get current time as default
   const getCurrentTime = () => {
@@ -182,7 +200,19 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  // DIRECTION-AWARE journey planning
+  // NEW: Get all physical stops for a given stop (including direction variants)
+  const getPhysicalStopsForLocation = (stopId: string): Stop[] => {
+    const stop = stops.find(s => s.stop_id === stopId);
+    if (!stop) return [stop].filter(Boolean) as Stop[];
+    
+    const consolidated = consolidatedStops.find(c => 
+      c.physicalStops.some(s => s.stop_id === stopId)
+    );
+    
+    return consolidated ? consolidated.physicalStops : [stop];
+  };
+
+  // Enhanced journey planning with stop consolidation
   const planJourney = async () => {
     if (!fromStopId || !toStopId || fromStopId === toStopId) {
       return;
@@ -199,613 +229,434 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
         return;
       }
 
-      console.log('🚌 DIRECTION-AWARE journey planning from:', fromStop.stop_name, 'to:', toStop.stop_name);
-      
-      const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStopId) || [];
-      const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStopId) || [];
-      
-      console.log('📍 From stop route-directions:', fromRouteDirections);
-      console.log('📍 To stop route-directions:', toRouteDirections);
+      console.log('🚌 Enhanced journey planning with stop consolidation');
+      console.log(`📍 From: ${fromStop.stop_name} (${fromStop.stop_id})`);
+      console.log(`📍 To: ${toStop.stop_name} (${toStop.stop_id})`);
 
+      // Get all physical variants of origin and destination
+      const fromPhysicalStops = getPhysicalStopsForLocation(fromStopId);
+      const toPhysicalStops = getPhysicalStopsForLocation(toStopId);
+      
+      console.log(`🏢 From location has ${fromPhysicalStops.length} physical stops`);
+      console.log(`🏢 To location has ${toPhysicalStops.length} physical stops`);
+
+      // Find routes using all physical stop combinations
       const allJourneys: JourneyResult[] = [];
-
-      // Step 1: Find ALL direct routes with proper direction handling
-      const directRoutes = await findDirectRoutesWithDirections(fromStop, toStop);
-      console.log('📍 Direct routes found:', directRoutes.length);
-      allJourneys.push(...directRoutes);
       
-      // Step 2: Find transfer routes with direction awareness
-      const transferRoutes = await findTransferRoutesWithDirections(fromStop, toStop);
-      console.log('🔄 Transfer routes found:', transferRoutes.length);
+      // Try direct routes with all combinations
+      for (const fromPhysical of fromPhysicalStops) {
+        for (const toPhysical of toPhysicalStops) {
+          const directRoutes = await findDirectRoutesEnhanced(fromPhysical, toPhysical);
+          allJourneys.push(...directRoutes);
+        }
+      }
+      
+      console.log(`🎯 Found ${allJourneys.length} direct route combinations`);
+
+      // Try transfer routes with enhanced logic
+      const transferRoutes = await findTransferRoutesEnhanced(fromPhysicalStops, toPhysicalStops);
       allJourneys.push(...transferRoutes);
       
-      // Step 3: If still no routes, try comprehensive fallback
-      if (allJourneys.length === 0) {
-        console.log('🔍 No routes found, trying comprehensive fallback...');
-        const fallbackRoutes = await findFallbackRoutes(fromStop, toStop);
-        console.log('🔄 Fallback routes found:', fallbackRoutes.length);
-        allJourneys.push(...fallbackRoutes);
-      }
+      console.log(`🔄 Found ${transferRoutes.length} transfer route combinations`);
 
-      // Sort and limit results
-      const finalJourneys = allJourneys
+      // Remove duplicates and rank results
+      const uniqueJourneys = removeDuplicateJourneys(allJourneys)
         .filter(journey => journey.routes.length > 0)
         .sort((a, b) => {
-          // Prioritize direct routes, then by confidence, then by duration
-          if (a.transfers !== b.transfers) return a.transfers - b.transfers;
+          // Prioritize: confidence, then transfers, then duration
           if (a.confidence !== b.confidence) return b.confidence - a.confidence;
+          if (a.transfers !== b.transfers) return a.transfers - b.transfers;
           return a.totalDuration - b.totalDuration;
         })
-        .slice(0, 10); // Show up to 10 options
+        .slice(0, 12); // Show top 12 options
 
-      console.log('✅ FINAL journeys found:', finalJourneys.length);
-      setJourneyResults(finalJourneys);
-      
+      console.log(`✅ Final results: ${uniqueJourneys.length} unique journey options`);
+      setJourneyResults(uniqueJourneys);
     } catch (error) {
-      console.error('❌ Error planning journey:', error);
-      setJourneyResults([]);
+      console.error('❌ Error in enhanced journey planning:', error);
     } finally {
       setIsPlanning(false);
     }
   };
 
-  // Find direct routes with proper direction handling
-  const findDirectRoutesWithDirections = async (fromStop: Stop, toStop: Stop): Promise<JourneyResult[]> => {
+  // Enhanced direct route finding with better direction handling
+  const findDirectRoutesEnhanced = async (fromStop: Stop, toStop: Stop): Promise<JourneyResult[]> => {
     const results: JourneyResult[] = [];
-    
-    try {
-      const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStop.stop_id) || [];
-      const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStop.stop_id) || [];
-      
-      // Find common route-direction combinations
-      const commonConnections = fromRouteDirections.filter(fromRD => 
-        toRouteDirections.some(toRD => 
-          toRD.routeId === fromRD.routeId && toRD.direction === fromRD.direction
-        )
+    const searchTime = departureTime || getCurrentTime();
+
+    console.log(`🔍 Searching direct routes: ${fromStop.stop_name} → ${toStop.stop_name}`);
+
+    // Get stop times for both stops
+    const fromStopTimes = stopTimes.filter(st => st.stop_id === fromStop.stop_id);
+    const toStopTimes = stopTimes.filter(st => st.stop_id === toStop.stop_id);
+
+    // Group by trip to find connections
+    const tripConnections = new Map<string, {
+      fromStopTime: StopTime;
+      toStopTime: StopTime;
+      trip: Trip;
+      route: Route;
+    }>();
+
+    fromStopTimes.forEach(fromST => {
+      const toST = toStopTimes.find(toStopTime => 
+        toStopTime.trip_id === fromST.trip_id &&
+        toStopTime.stop_sequence > fromST.stop_sequence && // Correct sequence
+        toStopTime.departure_time && fromST.departure_time &&
+        fromST.departure_time >= searchTime // After search time
       );
-      
-      console.log(`🔍 Found ${commonConnections.length} common route-direction combinations:`, commonConnections);
 
-      for (const connection of commonConnections) {
-        const route = routes.find(r => r.route_id === connection.routeId);
-        if (!route) continue;
+      if (toST) {
+        const trip = trips.find(t => t.trip_id === fromST.trip_id);
+        const route = trip ? routes.find(r => r.route_id === trip.route_id) : null;
 
-        console.log(`🚌 Processing route ${route.route_short_name} direction ${connection.direction}`);
-
-        // Get the ordered stops for this route-direction
-        const directionStops = routeStopMappings.routeDirectionStops
-          .get(connection.routeId)?.get(connection.direction) || [];
-
-        // Find positions of our stops in the sequence
-        const fromStopIndex = directionStops.findIndex(st => st.stop_id === fromStop.stop_id);
-        const toStopIndex = directionStops.findIndex(st => st.stop_id === toStop.stop_id);
-
-        console.log(`  📍 Stop positions: from=${fromStopIndex}, to=${toStopIndex}`);
-
-        // Check if stops are in correct order (from before to)
-        if (fromStopIndex >= 0 && toStopIndex >= 0 && fromStopIndex < toStopIndex) {
-          // Find a valid trip for this route-direction
-          const validTrip = trips.find(trip => 
-            trip.route_id === connection.routeId && 
-            trip.direction_id === connection.direction
-          );
-
-          if (validTrip) {
-            const fromStopTime = directionStops[fromStopIndex];
-            const toStopTime = directionStops[toStopIndex];
-
-            // Use trip times if available, otherwise use default times
-            const departureTime = fromStopTime.departure_time || '08:00:00';
-            const arrivalTime = toStopTime.arrival_time || toStopTime.departure_time || '08:30:00';
-
-            const duration = calculateTimeDifference(departureTime, arrivalTime);
-
-            if (duration > 0 && duration < 300) { // Max 5 hours
-              const directionLabel = connection.direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
-
-              // Get intermediate stops
-              const intermediateStops = directionStops
-                .slice(fromStopIndex + 1, toStopIndex)
-                .map(st => stops.find(stop => stop.stop_id === st.stop_id))
-                .filter(Boolean) as Stop[];
-
-              results.push({
-                id: `direct-${route.route_id}-${connection.direction}-${fromStopIndex}-${toStopIndex}`,
-                fromStop,
-                toStop,
-                routes: [{
-                  route,
-                  trip: validTrip,
-                  fromStop,
-                  toStop,
-                  departureTime,
-                  arrivalTime,
-                  duration,
-                  stops: [fromStop, ...intermediateStops, toStop],
-                  direction: connection.direction,
-                  directionLabel
-                }],
-                totalDuration: duration,
-                totalDistance: calculateDistance(fromStop, toStop),
-                transfers: 0,
-                walkingTime: 0,
-                confidence: 100
-              });
-
-              console.log(`  ✅ Added direct route: ${route.route_short_name} ${directionLabel}`);
-            }
-          }
-        } else if (fromStopIndex >= 0 && toStopIndex >= 0) {
-          console.log(`  ⚠️ Stops in wrong order for direction ${connection.direction}: from=${fromStopIndex}, to=${toStopIndex}`);
+        if (trip && route) {
+          const key = `${route.route_id}-${trip.direction_id}-${trip.trip_id}`;
+          tripConnections.set(key, {
+            fromStopTime: fromST,
+            toStopTime: toST,
+            trip,
+            route
+          });
         }
       }
+    });
 
-      console.log(`📍 Total direct routes found: ${results.length}`);
-      return results;
-      
-    } catch (error) {
-      console.error('Error in findDirectRoutesWithDirections:', error);
-      return [];
-    }
+    console.log(`  📊 Found ${tripConnections.size} direct trip connections`);
+
+    // Convert to journey results
+    Array.from(tripConnections.values()).forEach((connection, index) => {
+      const duration = calculateTimeDifference(
+        connection.fromStopTime.departure_time,
+        connection.toStopTime.arrival_time || connection.toStopTime.departure_time
+      );
+
+      if (duration > 0 && duration < 300) { // Reasonable duration
+        const intermediateStops = getIntermediateStops(
+          connection.trip.trip_id,
+          connection.fromStopTime.stop_sequence,
+          connection.toStopTime.stop_sequence
+        );
+
+        const directionLabel = connection.trip.direction_id === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
+
+        results.push({
+          id: `direct-enhanced-${connection.route.route_id}-${connection.trip.direction_id}-${index}`,
+          fromStop,
+          toStop,
+          routes: [{
+            route: connection.route,
+            trip: connection.trip,
+            fromStop,
+            toStop,
+            departureTime: connection.fromStopTime.departure_time,
+            arrivalTime: connection.toStopTime.arrival_time || connection.toStopTime.departure_time,
+            duration,
+            stops: [fromStop, ...intermediateStops, toStop],
+            direction: connection.trip.direction_id,
+            directionLabel
+          }],
+          totalDuration: duration,
+          totalDistance: calculateDistance(fromStop, toStop),
+          transfers: 0,
+          walkingTime: 0,
+          confidence: 100 // Direct routes have highest confidence
+        });
+      }
+    });
+
+    return results;
   };
 
-  // Find transfer routes with direction awareness
-  const findTransferRoutesWithDirections = async (fromStop: Stop, toStop: Stop): Promise<JourneyResult[]> => {
+  // Enhanced transfer route finding with physical stop awareness
+  const findTransferRoutesEnhanced = async (fromPhysicalStops: Stop[], toPhysicalStops: Stop[]): Promise<JourneyResult[]> => {
     const results: JourneyResult[] = [];
     
-    try {
-      console.log('🔄 Starting direction-aware transfer search...');
+    console.log('🔄 Enhanced transfer search with physical stop consolidation');
 
-      // Get potential transfer hubs
-      const transferHubs = findPotentialTransferHubs(fromStop, toStop);
-      console.log(`🏢 Found ${transferHubs.length} potential transfer hubs`);
+    // Find potential transfer hubs
+    const transferHubs = await findEnhancedTransferHubs(fromPhysicalStops, toPhysicalStops);
+    console.log(`🏢 Found ${transferHubs.length} potential transfer hubs`);
 
-      for (const hub of transferHubs.slice(0, 20)) { // Limit to top 20 hubs
-        try {
-          console.log(`🔍 Checking hub: ${hub.stop_name}`);
-          
-          // Find route-direction combinations from origin to hub
-          const originToHubConnections = findDirectionAwareConnections(fromStop, hub);
-          console.log(`  📍 Origin to hub connections: ${originToHubConnections.length}`);
-          
-          // Find route-direction combinations from hub to destination
-          const hubToDestConnections = findDirectionAwareConnections(hub, toStop);
-          console.log(`  📍 Hub to destination connections: ${hubToDestConnections.length}`);
-          
-          // Create transfer combinations
-          for (const conn1 of originToHubConnections.slice(0, 3)) {
-            for (const conn2 of hubToDestConnections.slice(0, 3)) {
-              if (conn1.routeId !== conn2.routeId) { // Different routes for transfer
-                const transfer = await createDirectionAwareTransfer(fromStop, hub, toStop, conn1, conn2);
-                if (transfer) {
-                  results.push(transfer);
-                }
+    for (const hub of transferHubs) {
+      try {
+        // Get all physical stops at this hub location
+        const hubPhysicalStops = getPhysicalStopsForLocation(hub.stop_id);
+        
+        console.log(`🔍 Checking hub: ${hub.stop_name} (${hubPhysicalStops.length} physical stops)`);
+
+        // Try all combinations of origin → hub → destination
+        for (const fromStop of fromPhysicalStops) {
+          for (const hubStop of hubPhysicalStops) {
+            for (const toStop of toPhysicalStops) {
+              // Find first leg: origin to hub
+              const firstLeg = await findDirectRoutesEnhanced(fromStop, hubStop);
+              
+              // Find second leg: hub to destination (try all hub physical stops)
+              for (const hubExitStop of hubPhysicalStops) {
+                const secondLeg = await findDirectRoutesEnhanced(hubExitStop, toStop);
+                
+                // Create transfer combinations
+                firstLeg.forEach(leg1 => {
+                  secondLeg.forEach(leg2 => {
+                    const transfer = createEnhancedTransfer(leg1, leg2, hubStop, hubExitStop);
+                    if (transfer) {
+                      results.push(transfer);
+                    }
+                  });
+                });
               }
             }
           }
-          
-        } catch (error) {
-          console.error(`Error processing hub ${hub.stop_name}:`, error);
-          continue;
+        }
+      } catch (error) {
+        console.error(`❌ Error processing hub ${hub.stop_name}:`, error);
+      }
+    }
+
+    return results;
+  };
+
+  // Enhanced transfer hub finding
+  const findEnhancedTransferHubs = async (fromPhysicalStops: Stop[], toPhysicalStops: Stop[]): Promise<Stop[]> => {
+    const hubs = new Set<Stop>();
+
+    // Strategy 1: Official interchanges
+    const interchanges = stops.filter(stop => stop.location_type === 1);
+    interchanges.forEach(hub => hubs.add(hub));
+
+    // Strategy 2: High-traffic stops (served by many routes)
+    const highTrafficStops = stops.filter(stop => {
+      const routeCount = getRoutesServingStop(stop.stop_id).length;
+      return routeCount >= 3 && 
+             !fromPhysicalStops.some(s => s.stop_id === stop.stop_id) &&
+             !toPhysicalStops.some(s => s.stop_id === stop.stop_id);
+    });
+    highTrafficStops.forEach(hub => hubs.add(hub));
+
+    // Strategy 3: Stops that connect origin and destination networks
+    const fromRoutes = new Set<string>();
+    const toRoutes = new Set<string>();
+    
+    fromPhysicalStops.forEach(stop => {
+      getRoutesServingStop(stop.stop_id).forEach(route => fromRoutes.add(route.route_id));
+    });
+    
+    toPhysicalStops.forEach(stop => {
+      getRoutesServingStop(stop.stop_id).forEach(route => toRoutes.add(route.route_id));
+    });
+
+    // Find stops served by routes that connect to both networks
+    stops.forEach(stop => {
+      const stopRoutes = getRoutesServingStop(stop.stop_id);
+      const connectsToOrigin = stopRoutes.some(route => fromRoutes.has(route.route_id));
+      const connectsToDestination = stopRoutes.some(route => toRoutes.has(route.route_id));
+      
+      if (connectsToOrigin && connectsToDestination) {
+        hubs.add(stop);
+      }
+    });
+
+    // Convert to array and sort by potential
+    return Array.from(hubs)
+      .map(hub => ({
+        stop: hub,
+        score: calculateEnhancedHubScore(hub, fromPhysicalStops, toPhysicalStops)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30) // Top 30 hubs
+      .map(item => item.stop);
+  };
+
+  // Enhanced hub scoring
+  const calculateEnhancedHubScore = (hub: Stop, fromStops: Stop[], toStops: Stop[]): number => {
+    let score = 0;
+    
+    // Route count bonus
+    const routeCount = getRoutesServingStop(hub.stop_id).length;
+    score += routeCount * 15;
+    
+    // Official interchange bonus
+    if (hub.location_type === 1) score += 100;
+    
+    // Physical stop consolidation bonus
+    const hubPhysicalStops = getPhysicalStopsForLocation(hub.stop_id);
+    score += hubPhysicalStops.length * 20; // More physical stops = better transfer hub
+    
+    // Geographic position bonus
+    const avgFromLat = fromStops.reduce((sum, s) => sum + s.stop_lat, 0) / fromStops.length;
+    const avgFromLon = fromStops.reduce((sum, s) => sum + s.stop_lon, 0) / fromStops.length;
+    const avgToLat = toStops.reduce((sum, s) => sum + s.stop_lat, 0) / toStops.length;
+    const avgToLon = toStops.reduce((sum, s) => sum + s.stop_lon, 0) / toStops.length;
+    
+    const fromDistance = calculateDistance({ stop_lat: avgFromLat, stop_lon: avgFromLon } as Stop, hub);
+    const toDistance = calculateDistance({ stop_lat: avgToLat, stop_lon: avgToLon } as Stop, hub);
+    const directDistance = calculateDistance(
+      { stop_lat: avgFromLat, stop_lon: avgFromLon } as Stop,
+      { stop_lat: avgToLat, stop_lon: avgToLon } as Stop
+    );
+    
+    const detourFactor = (fromDistance + toDistance) / Math.max(directDistance, 0.1);
+    if (detourFactor < 2.0) score += 50; // Reasonable detour
+    if (detourFactor < 1.5) score += 30; // Good detour
+    
+    // Accessibility bonus
+    if (hub.wheelchair_boarding === 1) score += 25;
+    
+    return score;
+  };
+
+  // Enhanced transfer creation with physical stop awareness
+  const createEnhancedTransfer = (
+    leg1: JourneyResult, 
+    leg2: JourneyResult, 
+    hubEntryStop: Stop, 
+    hubExitStop: Stop
+  ): JourneyResult | null => {
+    try {
+      const leg1Route = leg1.routes[0];
+      const leg2Route = leg2.routes[0];
+      
+      // Calculate transfer time (consider if it's the same physical stop or requires walking)
+      const transferTime = hubEntryStop.stop_id === hubExitStop.stop_id ? 
+        calculateTransferTime(hubEntryStop) : // Same stop transfer
+        calculateWalkingTime(hubEntryStop, hubExitStop); // Walking transfer
+      
+      const waitTime = calculateTimeDifference(
+        leg1Route.arrivalTime,
+        leg2Route.departureTime
+      );
+      
+      // Validate transfer feasibility
+      if (waitTime >= transferTime && waitTime <= 60) { // 1-60 minute transfer window
+        const totalDuration = leg1.totalDuration + leg2.totalDuration + waitTime;
+        
+        if (totalDuration < 360) { // Less than 6 hours total
+          return {
+            id: `enhanced-transfer-${leg1Route.route.route_id}-${leg2Route.route.route_id}-${hubEntryStop.stop_id}-${hubExitStop.stop_id}`,
+            fromStop: leg1.fromStop,
+            toStop: leg2.toStop,
+            routes: [
+              {
+                ...leg1Route,
+                toStop: hubEntryStop
+              },
+              {
+                ...leg2Route,
+                fromStop: hubExitStop
+              }
+            ],
+            totalDuration,
+            totalDistance: leg1.totalDistance + leg2.totalDistance + 
+              (hubEntryStop.stop_id !== hubExitStop.stop_id ? calculateDistance(hubEntryStop, hubExitStop) : 0),
+            transfers: 1,
+            walkingTime: transferTime,
+            confidence: Math.max(60, 95 - waitTime - (transferTime > 5 ? 10 : 0)), // Penalize walking transfers
+            transferStops: hubEntryStop.stop_id === hubExitStop.stop_id ? [hubEntryStop] : [hubEntryStop, hubExitStop]
+          };
         }
       }
-
-      console.log(`🔄 Total transfer routes found: ${results.length}`);
-      return results;
-      
     } catch (error) {
-      console.error('Error in findTransferRoutesWithDirections:', error);
-      return [];
-    }
-  };
-
-  // Find direction-aware connections between two stops
-  const findDirectionAwareConnections = (fromStop: Stop, toStop: Stop) => {
-    const connections: Array<{routeId: string, direction: number, route: Route}> = [];
-    
-    const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStop.stop_id) || [];
-    const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStop.stop_id) || [];
-    
-    // Find common route-direction combinations
-    const commonConnections = fromRouteDirections.filter(fromRD => 
-      toRouteDirections.some(toRD => 
-        toRD.routeId === fromRD.routeId && toRD.direction === fromRD.direction
-      )
-    );
-
-    for (const conn of commonConnections) {
-      const route = routes.find(r => r.route_id === conn.routeId);
-      if (!route) continue;
-
-      // Verify stop order
-      const directionStops = routeStopMappings.routeDirectionStops
-        .get(conn.routeId)?.get(conn.direction) || [];
-
-      const fromIndex = directionStops.findIndex(st => st.stop_id === fromStop.stop_id);
-      const toIndex = directionStops.findIndex(st => st.stop_id === toStop.stop_id);
-
-      if (fromIndex >= 0 && toIndex >= 0 && fromIndex < toIndex) {
-        connections.push({
-          routeId: conn.routeId,
-          direction: conn.direction,
-          route
-        });
-      }
-    }
-
-    return connections;
-  };
-
-  // Create direction-aware transfer journey
-  const createDirectionAwareTransfer = async (
-    fromStop: Stop, 
-    hubStop: Stop, 
-    toStop: Stop, 
-    conn1: {routeId: string, direction: number, route: Route},
-    conn2: {routeId: string, direction: number, route: Route}
-  ): Promise<JourneyResult | null> => {
-    try {
-      // Find valid trips for each connection
-      const trip1 = trips.find(trip => 
-        trip.route_id === conn1.routeId && trip.direction_id === conn1.direction
-      );
-      const trip2 = trips.find(trip => 
-        trip.route_id === conn2.routeId && trip.direction_id === conn2.direction
-      );
-
-      if (!trip1 || !trip2) return null;
-
-      // Get stop sequences for timing
-      const dir1Stops = routeStopMappings.routeDirectionStops
-        .get(conn1.routeId)?.get(conn1.direction) || [];
-      const dir2Stops = routeStopMappings.routeDirectionStops
-        .get(conn2.routeId)?.get(conn2.direction) || [];
-
-      const fromStopTime = dir1Stops.find(st => st.stop_id === fromStop.stop_id);
-      const hubStopTime1 = dir1Stops.find(st => st.stop_id === hubStop.stop_id);
-      const hubStopTime2 = dir2Stops.find(st => st.stop_id === hubStop.stop_id);
-      const toStopTime = dir2Stops.find(st => st.stop_id === toStop.stop_id);
-
-      if (!fromStopTime || !hubStopTime1 || !hubStopTime2 || !toStopTime) return null;
-
-      // Use available times or defaults
-      const dep1 = fromStopTime.departure_time || '08:00:00';
-      const arr1 = hubStopTime1.arrival_time || hubStopTime1.departure_time || '08:30:00';
-      const dep2 = hubStopTime2.departure_time || '08:45:00';
-      const arr2 = toStopTime.arrival_time || toStopTime.departure_time || '09:15:00';
-
-      const leg1Duration = calculateTimeDifference(dep1, arr1);
-      const leg2Duration = calculateTimeDifference(dep2, arr2);
-      const waitTime = calculateTimeDifference(arr1, dep2);
-
-      if (leg1Duration > 0 && leg2Duration > 0 && waitTime >= 5 && waitTime <= 60) {
-        const directionLabel1 = conn1.direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
-        const directionLabel2 = conn2.direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
-
-        return {
-          id: `transfer-${conn1.routeId}-${conn1.direction}-${conn2.routeId}-${conn2.direction}-${hubStop.stop_id}`,
-          fromStop,
-          toStop,
-          routes: [
-            {
-              route: conn1.route,
-              trip: trip1,
-              fromStop,
-              toStop: hubStop,
-              departureTime: dep1,
-              arrivalTime: arr1,
-              duration: leg1Duration,
-              stops: [fromStop, hubStop],
-              direction: conn1.direction,
-              directionLabel: directionLabel1
-            },
-            {
-              route: conn2.route,
-              trip: trip2,
-              fromStop: hubStop,
-              toStop,
-              departureTime: dep2,
-              arrivalTime: arr2,
-              duration: leg2Duration,
-              stops: [hubStop, toStop],
-              direction: conn2.direction,
-              directionLabel: directionLabel2
-            }
-          ],
-          totalDuration: leg1Duration + leg2Duration + waitTime,
-          totalDistance: calculateDistance(fromStop, hubStop) + calculateDistance(hubStop, toStop),
-          transfers: 1,
-          walkingTime: 8,
-          confidence: Math.max(70, 95 - waitTime),
-          transferStops: [hubStop]
-        };
-      }
-    } catch (error) {
-      console.error('Error creating direction-aware transfer:', error);
+      console.error('Error creating enhanced transfer:', error);
     }
     
     return null;
   };
 
-  // Find potential transfer hubs
-  const findPotentialTransferHubs = (fromStop: Stop, toStop: Stop): Stop[] => {
-    const hubs = new Set<Stop>();
-    
-    try {
-      // Strategy 1: Official interchanges
-      const interchanges = stops.filter(stop => stop.location_type === 1);
-      interchanges.forEach(hub => hubs.add(hub));
-
-      // Strategy 2: High-traffic stops (served by many route-directions)
-      const highTrafficStops = stops.filter(stop => {
-        if (stop.stop_id === fromStop.stop_id || stop.stop_id === toStop.stop_id) return false;
-        const routeDirections = routeStopMappings.stopRouteDirections.get(stop.stop_id) || [];
-        return routeDirections.length >= 2; // At least 2 route-direction combinations
-      });
-      
-      highTrafficStops.forEach(hub => hubs.add(hub));
-
-      // Strategy 3: Stops that connect origin and destination networks
-      const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStop.stop_id) || [];
-      const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStop.stop_id) || [];
-      
-      // Find stops served by routes that serve the origin
-      const originNetworkStops = new Set<string>();
-      fromRouteDirections.forEach(rd => {
-        const routeStops = routeStopMappings.routeDirectionStops.get(rd.routeId)?.get(rd.direction) || [];
-        routeStops.forEach(st => originNetworkStops.add(st.stop_id));
-      });
-
-      // Find stops served by routes that serve the destination
-      const destNetworkStops = new Set<string>();
-      toRouteDirections.forEach(rd => {
-        const routeStops = routeStopMappings.routeDirectionStops.get(rd.routeId)?.get(rd.direction) || [];
-        routeStops.forEach(st => destNetworkStops.add(st.stop_id));
-      });
-
-      // Find connecting stops
-      const connectingStopIds = Array.from(originNetworkStops).filter(stopId => 
-        destNetworkStops.has(stopId) && 
-        stopId !== fromStop.stop_id && 
-        stopId !== toStop.stop_id
-      );
-
-      const connectingStops = stops.filter(stop => connectingStopIds.includes(stop.stop_id));
-      connectingStops.forEach(hub => hubs.add(hub));
-
-      // Convert to array and sort by potential
-      const hubArray = Array.from(hubs)
-        .map(hub => ({
-          stop: hub,
-          score: calculateHubScore(hub, fromStop, toStop)
-        }))
-        .sort((a, b) => b.score - a.score)
-        .map(item => item.stop);
-
-      return hubArray;
-      
-    } catch (error) {
-      console.error('Error in findPotentialTransferHubs:', error);
-      return [];
-    }
+  // Calculate walking time between stops
+  const calculateWalkingTime = (stop1: Stop, stop2: Stop): number => {
+    const distance = calculateDistance(stop1, stop2);
+    return Math.max(5, Math.ceil(distance * 12)); // Minimum 5 minutes, ~12 min per km
   };
 
-  // Fallback search for edge cases
-  const findFallbackRoutes = async (fromStop: Stop, toStop: Stop): Promise<JourneyResult[]> => {
-    const results: JourneyResult[] = [];
+  // Get routes serving a specific stop
+  const getRoutesServingStop = (stopId: string): Route[] => {
+    const stopTrips = stopTimes
+      .filter(st => st.stop_id === stopId)
+      .map(st => st.trip_id);
     
-    try {
-      console.log('🔍 Starting fallback search with relaxed constraints...');
-      
-      // Try to find ANY connection, even with estimated times
-      const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStop.stop_id) || [];
-      const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStop.stop_id) || [];
-      
-      console.log(`📊 From stop serves ${fromRouteDirections.length} route-directions`);
-      console.log(`📊 To stop serves ${toRouteDirections.length} route-directions`);
+    const routeIds = [...new Set(
+      trips
+        .filter(trip => stopTrips.includes(trip.trip_id))
+        .map(trip => trip.route_id)
+    )];
 
-      // Try multi-hop via any intermediate stop
-      for (const intermediateStop of stops.slice(0, 100)) { // Limit search
-        if (intermediateStop.stop_id === fromStop.stop_id || intermediateStop.stop_id === toStop.stop_id) {
-          continue;
-        }
-        
-        const intermediateRouteDirections = routeStopMappings.stopRouteDirections.get(intermediateStop.stop_id) || [];
-        
-        // Check if intermediate stop can connect to both origin and destination
-        const connectsToOrigin = fromRouteDirections.some(fromRD => 
-          intermediateRouteDirections.some(intRD => intRD.routeId === fromRD.routeId)
-        );
-        
-        const connectsToDest = toRouteDirections.some(toRD => 
-          intermediateRouteDirections.some(intRD => intRD.routeId === toRD.routeId)
-        );
-        
-        if (connectsToOrigin && connectsToDest) {
-          // Create a simple estimated journey
-          const estimatedJourney = createEstimatedJourney(fromStop, intermediateStop, toStop);
-          if (estimatedJourney) {
-            results.push(estimatedJourney);
-          }
-        }
-        
-        // Limit results to prevent infinite search
-        if (results.length >= 3) break;
-      }
-      
-      console.log(`🔍 Fallback search found: ${results.length} routes`);
-      return results;
-      
-    } catch (error) {
-      console.error('Error in findFallbackRoutes:', error);
-      return [];
-    }
+    return routes.filter(route => routeIds.includes(route.route_id));
   };
 
-  // Create estimated journey for fallback
-  const createEstimatedJourney = (fromStop: Stop, hubStop: Stop, toStop: Stop): JourneyResult | null => {
-    try {
-      // Find any routes that can make this connection
-      const fromRouteDirections = routeStopMappings.stopRouteDirections.get(fromStop.stop_id) || [];
-      const hubRouteDirections = routeStopMappings.stopRouteDirections.get(hubStop.stop_id) || [];
-      const toRouteDirections = routeStopMappings.stopRouteDirections.get(toStop.stop_id) || [];
-
-      // Find connecting routes
-      const route1Connection = fromRouteDirections.find(fromRD => 
-        hubRouteDirections.some(hubRD => hubRD.routeId === fromRD.routeId && hubRD.direction === fromRD.direction)
-      );
-
-      const route2Connection = hubRouteDirections.find(hubRD => 
-        toRouteDirections.some(toRD => toRD.routeId === hubRD.routeId && toRD.direction === hubRD.direction)
-      );
-
-      if (!route1Connection || !route2Connection) return null;
-
-      const route1 = routes.find(r => r.route_id === route1Connection.routeId);
-      const route2 = routes.find(r => r.route_id === route2Connection.routeId);
-
-      if (!route1 || !route2) return null;
-
-      // Create estimated journey with default times
-      const estimatedDuration1 = Math.max(15, calculateDistance(fromStop, hubStop) * 3); // 3 min per km
-      const estimatedDuration2 = Math.max(15, calculateDistance(hubStop, toStop) * 3);
-      const transferTime = 10;
-
-      const trip1 = trips.find(t => t.route_id === route1.route_id && t.direction_id === route1Connection.direction) || {} as Trip;
-      const trip2 = trips.find(t => t.route_id === route2.route_id && t.direction_id === route2Connection.direction) || {} as Trip;
-
-      return {
-        id: `estimated-${route1.route_id}-${route2.route_id}-${hubStop.stop_id}`,
-        fromStop,
-        toStop,
-        routes: [
-          {
-            route: route1,
-            trip: trip1,
-            fromStop,
-            toStop: hubStop,
-            departureTime: '08:00:00',
-            arrivalTime: '08:30:00',
-            duration: estimatedDuration1,
-            stops: [fromStop, hubStop],
-            direction: route1Connection.direction,
-            directionLabel: route1Connection.direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)'
-          },
-          {
-            route: route2,
-            trip: trip2,
-            fromStop: hubStop,
-            toStop,
-            departureTime: '08:40:00',
-            arrivalTime: '09:10:00',
-            duration: estimatedDuration2,
-            stops: [hubStop, toStop],
-            direction: route2Connection.direction,
-            directionLabel: route2Connection.direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)'
-          }
-        ],
-        totalDuration: estimatedDuration1 + estimatedDuration2 + transferTime,
-        totalDistance: calculateDistance(fromStop, hubStop) + calculateDistance(hubStop, toStop),
-        transfers: 1,
-        walkingTime: 8,
-        confidence: 40, // Lower confidence for estimated routes
-        transferStops: [hubStop]
-      };
-    } catch (error) {
-      console.error('Error creating estimated journey:', error);
-      return null;
-    }
+  // Calculate appropriate transfer time based on stop type
+  const calculateTransferTime = (stop: Stop): number => {
+    if (stop.location_type === 1) return 5; // Official interchange - 5 minutes
+    return 8; // Regular stop - 8 minutes
   };
 
-  // Calculate hub score for ranking
-  const calculateHubScore = (hub: Stop, fromStop: Stop, toStop: Stop): number => {
-    let score = 0;
-    
-    try {
-      // Route-direction count (more connections = better hub)
-      const routeDirections = routeStopMappings.stopRouteDirections.get(hub.stop_id) || [];
-      score += routeDirections.length * 10;
-      
-      // Official interchange bonus
-      if (hub.location_type === 1) score += 50;
-      
-      // Geographic position (prefer hubs between origin and destination)
-      const totalDistance = calculateDistance(fromStop, toStop);
-      if (totalDistance > 0) {
-        const hubToOrigin = calculateDistance(fromStop, hub);
-        const hubToDestination = calculateDistance(hub, toStop);
-        const detourFactor = (hubToOrigin + hubToDestination) / totalDistance;
-        
-        if (detourFactor < 1.5) score += 30;
-        if (detourFactor < 1.2) score += 20;
-      }
-      
-      // Accessibility bonus
-      if (hub.wheelchair_boarding === 1) score += 10;
-      
-      return score;
-    } catch (error) {
-      console.error('Error calculating hub score:', error);
-      return 0;
-    }
+  // Get intermediate stops for a trip segment
+  const getIntermediateStops = (tripId: string, fromSequence: number, toSequence: number): Stop[] => {
+    const tripStopTimes = stopTimes
+      .filter(st => 
+        st.trip_id === tripId && 
+        st.stop_sequence > fromSequence && 
+        st.stop_sequence < toSequence
+      )
+      .sort((a, b) => a.stop_sequence - b.stop_sequence);
+
+    return tripStopTimes
+      .map(st => stops.find(stop => stop.stop_id === st.stop_id))
+      .filter(Boolean) as Stop[];
   };
 
   // Calculate time difference in minutes
   const calculateTimeDifference = (startTime: string, endTime: string): number => {
-    if (!startTime || !endTime) return 30; // Default 30 minutes if no time data
+    if (!startTime || !endTime) return 0;
     
-    try {
-      const [startHours, startMinutes] = startTime.split(':').map(Number);
-      const [endHours, endMinutes] = endTime.split(':').map(Number);
-      
-      let startTotalMinutes = startHours * 60 + startMinutes;
-      let endTotalMinutes = endHours * 60 + endMinutes;
-      
-      // Handle next day scenarios
-      if (endTotalMinutes < startTotalMinutes) {
-        endTotalMinutes += 24 * 60;
-      }
-      
-      const diff = endTotalMinutes - startTotalMinutes;
-      return diff > 0 ? diff : 30; // Default to 30 minutes if calculation fails
-    } catch (error) {
-      console.error('Error calculating time difference:', error);
-      return 30;
+    const [startHours, startMinutes] = startTime.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.split(':').map(Number);
+    
+    let startTotalMinutes = startHours * 60 + startMinutes;
+    let endTotalMinutes = endHours * 60 + endMinutes;
+    
+    // Handle next day scenarios
+    if (endTotalMinutes < startTotalMinutes) {
+      endTotalMinutes += 24 * 60;
     }
+    
+    return endTotalMinutes - startTotalMinutes;
   };
 
   // Calculate distance between stops using Haversine formula
   const calculateDistance = (stop1: Stop, stop2: Stop): number => {
-    try {
-      const R = 6371; // Earth's radius in km
-      const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
-      const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return Math.round(R * c * 100) / 100;
-    } catch (error) {
-      console.error('Error calculating distance:', error);
-      return 1; // Default 1km if calculation fails
-    }
+    const R = 6371; // Earth's radius in km
+    const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
+    const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return Math.round(R * c * 100) / 100;
+  };
+
+  // Remove duplicate journeys
+  const removeDuplicateJourneys = (journeys: JourneyResult[]): JourneyResult[] => {
+    const seen = new Set<string>();
+    return journeys.filter(journey => {
+      const key = `${journey.fromStop.stop_id}-${journey.toStop.stop_id}-${journey.routes.map(r => `${r.route.route_id}-${r.direction}`).join('-')}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   };
 
   // Format time for display
   const formatTime = (timeStr: string): string => {
     if (!timeStr || !timeStr.includes(':')) return 'N/A';
-    try {
-      const [hours, minutes] = timeStr.split(':');
-      const hour = parseInt(hours);
-      const min = minutes;
-      
-      if (hour === 0) return `12:${min} AM`;
-      if (hour < 12) return `${hour}:${min} AM`;
-      if (hour === 12) return `12:${min} PM`;
-      return `${hour - 12}:${min} PM`;
-    } catch (error) {
-      return 'N/A';
-    }
+    const [hours, minutes] = timeStr.split(':');
+    const hour = parseInt(hours);
+    const min = minutes;
+    
+    if (hour === 0) return `12:${min} AM`;
+    if (hour < 12) return `${hour}:${min} AM`;
+    if (hour === 12) return `12:${min} PM`;
+    return `${hour - 12}:${min} PM`;
   };
 
   // Format duration
@@ -862,13 +713,6 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     setSelectedJourney(null);
   };
 
-  // Get routes serving a specific stop (optimized)
-  const getRoutesServingStop = (stopId: string): Route[] => {
-    const routeDirections = routeStopMappings.stopRouteDirections.get(stopId) || [];
-    const uniqueRouteIds = [...new Set(routeDirections.map(rd => rd.routeId))];
-    return routes.filter(route => uniqueRouteIds.includes(route.route_id));
-  };
-
   return (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between mb-6">
@@ -877,8 +721,8 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             <Navigation className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Direction-Aware Journey Planner</h3>
-            <p className="text-sm text-gray-600">Fixed inbound/outbound handling • Proper stop sequences • Guaranteed connections</p>
+            <h3 className="text-lg font-semibold text-gray-900">🚌 Smart Journey Planner</h3>
+            <p className="text-sm text-gray-600">Direction-aware • Stop consolidation • Physical location matching</p>
           </div>
         </div>
         {(fromStopId || toStopId || journeyResults.length > 0) && (
@@ -917,22 +761,28 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             
             {showFromDropdown && searchFromTerm && filteredFromStops.length > 0 && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredFromStops.map(stop => (
-                  <button
-                    key={stop.stop_id}
-                    onClick={() => handleFromStopSelect(stop)}
-                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                      fromStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
-                    }`}
-                  >
-                    <div className="font-medium text-sm">{stop.stop_name}</div>
-                    <div className="text-xs text-gray-600">
-                      Code: {stop.stop_code} • Zone: {stop.zone_id}
-                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
-                    </div>
-                  </button>
-                ))}
+                {filteredFromStops.map(stop => {
+                  const physicalStops = getPhysicalStopsForLocation(stop.stop_id);
+                  return (
+                    <button
+                      key={stop.stop_id}
+                      onClick={() => handleFromStopSelect(stop)}
+                      className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                        fromStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                      }`}
+                    >
+                      <div className="font-medium text-sm">{stop.stop_name}</div>
+                      <div className="text-xs text-gray-600">
+                        Code: {stop.stop_code} • Zone: {stop.zone_id}
+                        {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                        <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                        {physicalStops.length > 1 && (
+                          <span className="ml-2 text-purple-600">• {physicalStops.length} platforms</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -973,22 +823,28 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             
             {showToDropdown && searchToTerm && filteredToStops.length > 0 && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredToStops.map(stop => (
-                  <button
-                    key={stop.stop_id}
-                    onClick={() => handleToStopSelect(stop)}
-                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                      toStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
-                    }`}
-                  >
-                    <div className="font-medium text-sm">{stop.stop_name}</div>
-                    <div className="text-xs text-gray-600">
-                      Code: {stop.stop_code} • Zone: {stop.zone_id}
-                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
-                    </div>
-                  </button>
-                ))}
+                {filteredToStops.map(stop => {
+                  const physicalStops = getPhysicalStopsForLocation(stop.stop_id);
+                  return (
+                    <button
+                      key={stop.stop_id}
+                      onClick={() => handleToStopSelect(stop)}
+                      className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                        toStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                      }`}
+                    >
+                      <div className="font-medium text-sm">{stop.stop_name}</div>
+                      <div className="text-xs text-gray-600">
+                        Code: {stop.stop_code} • Zone: {stop.zone_id}
+                        {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                        <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                        {physicalStops.length > 1 && (
+                          <span className="ml-2 text-purple-600">• {physicalStops.length} platforms</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1022,12 +878,12 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           {isPlanning ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Analyzing directions & stop sequences...
+              Smart routing with stop consolidation...
             </>
           ) : (
             <>
               <Navigation className="w-4 h-4" />
-              Find Best Routes
+              Find Smart Routes
             </>
           )}
         </button>
@@ -1039,10 +895,10 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <RouteIcon className="w-5 h-5" />
-              Journey Options ({journeyResults.length})
+              Smart Journey Options ({journeyResults.length})
             </h4>
             <div className="text-sm text-gray-600">
-              Direction-aware results
+              🧠 Direction-aware • 🏢 Stop consolidation
             </div>
           </div>
           
@@ -1090,6 +946,13 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                         via {journey.transferStops[0].stop_name.split('-')[0]}
                       </span>
                     )}
+
+                    {/* Walking Transfer Indicator */}
+                    {journey.walkingTime > 8 && (
+                      <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full font-medium">
+                        🚶 {journey.walkingTime}m walk
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="text-right">
@@ -1097,7 +960,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                     {formatDuration(journey.totalDuration)}
                   </div>
                   <div className="text-xs text-gray-600">
-                    {journey.totalDistance}km • {journey.walkingTime}m walk
+                    {journey.totalDistance}km total
                   </div>
                 </div>
               </div>
@@ -1111,6 +974,9 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                         <div className="flex items-center gap-2 text-xs text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
                           <ArrowRight className="w-3 h-3" />
                           Transfer at {routeSegment.fromStop.stop_name} ({journey.walkingTime}min)
+                          {journey.transferStops && journey.transferStops.length > 1 && (
+                            <span className="text-blue-600">• Walk to {journey.transferStops[1].stop_name}</span>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1197,15 +1063,14 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Routes Found</h3>
           <p className="text-gray-600 mb-4">
-            Even with direction-aware search, no valid connections were found between these stops.
+            Our smart routing couldn't find connections between these locations.
           </p>
           <div className="text-sm text-gray-500 space-y-1">
-            <p>• ✅ Checked all route directions (inbound/outbound)</p>
-            <p>• ✅ Verified stop sequences for each direction</p>
-            <p>• ✅ Analyzed all {stops.filter(s => s.location_type === 1).length} official interchanges</p>
-            <p>• ✅ Tried multi-hop connections with direction validation</p>
-            <p>• ✅ Used fallback search with relaxed constraints</p>
-            <p>• 🔍 Check console for detailed direction analysis</p>
+            <p>• ✅ Checked all direction combinations</p>
+            <p>• ✅ Analyzed {consolidatedStops.length} physical locations</p>
+            <p>• ✅ Searched {stops.filter(s => s.location_type === 1).length} official interchanges</p>
+            <p>• ✅ Considered walking transfers between platforms</p>
+            <p>• 💡 Try different departure times or nearby stops</p>
           </div>
         </div>
       )}
@@ -1214,24 +1079,24 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       {journeyResults.length === 0 && !fromStopId && !toStopId && (
         <div className="text-center py-8 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg">
           <Navigation className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">🚌 Direction-Aware Journey Planning</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">🧠 Smart Journey Planning</h3>
           <p className="text-gray-600 mb-4">
-            Advanced direction handling ensures proper inbound/outbound route detection and stop sequence validation.
+            Advanced stop consolidation handles direction-specific stops and finds the fastest routes.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
             <div className="space-y-2">
-              <h4 className="font-semibold text-gray-900">🎯 Direction Features:</h4>
-              <p>• 🔄 Inbound/Outbound detection</p>
-              <p>• 📍 Stop sequence validation</p>
-              <p>• 🚌 Direction-aware transfers</p>
-              <p>• 🎯 Proper route ordering</p>
+              <h4 className="font-semibold text-gray-900">🚀 Smart Features:</h4>
+              <p>• 🏢 Physical stop consolidation</p>
+              <p>• 🔄 Direction-aware routing</p>
+              <p>• 🚶 Walking transfer detection</p>
+              <p>• 📊 Confidence scoring system</p>
             </div>
             <div className="space-y-2">
-              <h4 className="font-semibold text-gray-900">📊 Network Coverage:</h4>
-              <p>• All {routes.length} routes with directions</p>
-              <p>• {stops.filter(s => s.location_type === 1).length} interchange hubs</p>
-              <p>• {stops.length} total stops analyzed</p>
-              <p>• Guaranteed direction accuracy</p>
+              <h4 className="font-semibold text-gray-900">🎯 How it works:</h4>
+              <p>• Groups {stops.length} stops into {consolidatedStops.length} locations</p>
+              <p>• Handles inbound/outbound platforms</p>
+              <p>• Finds optimal transfer points</p>
+              <p>• Optimizes for time and reliability</p>
             </div>
           </div>
         </div>
