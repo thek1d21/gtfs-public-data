@@ -34,6 +34,16 @@ interface JourneyResult {
   transferStops?: Stop[];
 }
 
+interface StopWithDirections {
+  stop: Stop;
+  routeDirections: Array<{
+    route: Route;
+    direction: number;
+    directionLabel: string;
+    finalDestination: string;
+  }>;
+}
+
 export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   stops,
   routes,
@@ -52,11 +62,117 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   const [showFromDropdown, setShowFromDropdown] = useState<boolean>(false);
   const [showToDropdown, setShowToDropdown] = useState<boolean>(false);
 
-  // Enhanced stop filtering with better search
+  // Get route directions and final destinations for a stop
+  const getStopRouteDirections = (stop: Stop): Array<{
+    route: Route;
+    direction: number;
+    directionLabel: string;
+    finalDestination: string;
+  }> => {
+    // Get all trips that serve this stop
+    const stopStopTimes = stopTimes.filter(st => st.stop_id === stop.stop_id);
+    const stopTripIds = stopStopTimes.map(st => st.trip_id);
+    const stopTrips = trips.filter(trip => stopTripIds.includes(trip.trip_id));
+    
+    // Group by route and direction
+    const routeDirectionMap = new Map<string, {
+      route: Route;
+      direction: number;
+      trips: Trip[];
+    }>();
+
+    stopTrips.forEach(trip => {
+      const route = routes.find(r => r.route_id === trip.route_id);
+      if (!route) return;
+
+      const key = `${trip.route_id}-${trip.direction_id}`;
+      if (!routeDirectionMap.has(key)) {
+        routeDirectionMap.set(key, {
+          route,
+          direction: trip.direction_id,
+          trips: []
+        });
+      }
+      routeDirectionMap.get(key)!.trips.push(trip);
+    });
+
+    // Convert to array with final destinations
+    return Array.from(routeDirectionMap.values()).map(({ route, direction, trips }) => {
+      const directionLabel = direction === 0 ? 'Outbound' : 'Inbound';
+      const finalDestination = getFinalDestination(route.route_id, direction, stop.stop_id);
+      
+      return {
+        route,
+        direction,
+        directionLabel,
+        finalDestination
+      };
+    }).sort((a, b) => {
+      // Sort by route number first, then by direction
+      const routeCompare = a.route.route_short_name.localeCompare(b.route.route_short_name);
+      if (routeCompare !== 0) return routeCompare;
+      return a.direction - b.direction;
+    });
+  };
+
+  // Get final destination for a route direction from a specific stop
+  const getFinalDestination = (routeId: string, direction: number, fromStopId: string): string => {
+    try {
+      // Get all trips for this route and direction
+      const routeTrips = trips.filter(trip => 
+        trip.route_id === routeId && 
+        trip.direction_id === direction
+      );
+
+      if (routeTrips.length === 0) return 'Unknown destination';
+
+      // Get a representative trip
+      const sampleTrip = routeTrips[0];
+      
+      // Get all stop times for this trip, sorted by sequence
+      const tripStopTimes = stopTimes
+        .filter(st => st.trip_id === sampleTrip.trip_id)
+        .sort((a, b) => a.stop_sequence - b.stop_sequence);
+
+      if (tripStopTimes.length === 0) return 'Unknown destination';
+
+      // Find the current stop in the sequence
+      const currentStopTime = tripStopTimes.find(st => st.stop_id === fromStopId);
+      if (!currentStopTime) return 'Unknown destination';
+
+      // Get the final stop (last in sequence)
+      const finalStopTime = tripStopTimes[tripStopTimes.length - 1];
+      const finalStop = stops.find(s => s.stop_id === finalStopTime.stop_id);
+
+      if (!finalStop) return 'Unknown destination';
+
+      // Extract meaningful destination name (remove technical parts)
+      let destination = finalStop.stop_name;
+      
+      // Clean up destination name
+      destination = destination
+        .replace(/^(CTRA\.|AV\.|AVDA\.|PLAZA|PZA\.|C\/|CALLE)/i, '')
+        .replace(/-(URB\.|URBANIZACIÓN|COL\.|COLONIA)/i, '')
+        .trim();
+
+      // If destination is too long, take first meaningful part
+      if (destination.length > 25) {
+        const parts = destination.split('-');
+        destination = parts[0].trim();
+      }
+
+      return destination || 'Terminal';
+    } catch (error) {
+      console.error('Error getting final destination:', error);
+      return 'Unknown destination';
+    }
+  };
+
+  // Enhanced stop filtering with route directions
   const filteredFromStops = useMemo(() => {
     if (!searchFromTerm || searchFromTerm.length < 2) return [];
     
-    return stops.filter(stop => 
+    const matchingStops = stops.filter(stop => 
       stop.stop_name.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
       stop.stop_code.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
       stop.stop_id.toLowerCase().includes(searchFromTerm.toLowerCase())
@@ -69,12 +185,18 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       return a.stop_name.length - b.stop_name.length;
     })
     .slice(0, 15);
-  }, [stops, searchFromTerm]);
+
+    // Add route directions to each stop
+    return matchingStops.map(stop => ({
+      stop,
+      routeDirections: getStopRouteDirections(stop)
+    }));
+  }, [stops, searchFromTerm, routes, trips, stopTimes]);
 
   const filteredToStops = useMemo(() => {
     if (!searchToTerm || searchToTerm.length < 2) return [];
     
-    return stops.filter(stop => 
+    const matchingStops = stops.filter(stop => 
       stop.stop_id !== fromStopId && // Exclude selected from stop
       (stop.stop_name.toLowerCase().includes(searchToTerm.toLowerCase()) ||
        stop.stop_code.toLowerCase().includes(searchToTerm.toLowerCase()) ||
@@ -87,7 +209,13 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       return a.stop_name.length - b.stop_name.length;
     })
     .slice(0, 15);
-  }, [stops, searchToTerm, fromStopId]);
+
+    // Add route directions to each stop
+    return matchingStops.map(stop => ({
+      stop,
+      routeDirections: getStopRouteDirections(stop)
+    }));
+  }, [stops, searchToTerm, fromStopId, routes, trips, stopTimes]);
 
   // Get current time as default (Madrid timezone)
   const getCurrentTime = () => {
@@ -571,15 +699,15 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     setShowToDropdown(false);
   };
 
-  const handleFromStopSelect = (stop: Stop) => {
-    setFromStopId(stop.stop_id);
-    setSearchFromTerm(stop.stop_name);
+  const handleFromStopSelect = (stopWithDirections: StopWithDirections) => {
+    setFromStopId(stopWithDirections.stop.stop_id);
+    setSearchFromTerm(stopWithDirections.stop.stop_name);
     setShowFromDropdown(false);
   };
 
-  const handleToStopSelect = (stop: Stop) => {
-    setToStopId(stop.stop_id);
-    setSearchToTerm(stop.stop_name);
+  const handleToStopSelect = (stopWithDirections: StopWithDirections) => {
+    setToStopId(stopWithDirections.stop.stop_id);
+    setSearchToTerm(stopWithDirections.stop.stop_name);
     setShowToDropdown(false);
   };
 
@@ -606,7 +734,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           </div>
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Enhanced Journey Planner</h3>
-            <p className="text-sm text-gray-600">Standard GTFS times • Madrid timezone • Departure time filtering</p>
+            <p className="text-sm text-gray-600">Route directions • Final destinations • Standard GTFS times</p>
           </div>
         </div>
         {(fromStopId || toStopId || journeyResults.length > 0) && (
@@ -644,21 +772,50 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             <Search className="absolute right-2 top-2.5 w-4 h-4 text-gray-400" />
             
             {showFromDropdown && searchFromTerm && filteredFromStops.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredFromStops.map(stop => (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {filteredFromStops.map(stopWithDirections => (
                   <button
-                    key={stop.stop_id}
-                    onClick={() => handleFromStopSelect(stop)}
-                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                      fromStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                    key={stopWithDirections.stop.stop_id}
+                    onClick={() => handleFromStopSelect(stopWithDirections)}
+                    className={`w-full text-left px-3 py-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                      fromStopId === stopWithDirections.stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
                     }`}
                   >
-                    <div className="font-medium text-sm">{stop.stop_name}</div>
-                    <div className="text-xs text-gray-600">
-                      Code: {stop.stop_code} • Zone: {stop.zone_id}
-                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                    <div className="font-medium text-sm mb-1">{stopWithDirections.stop.stop_name}</div>
+                    <div className="text-xs text-gray-600 mb-2">
+                      Code: {stopWithDirections.stop.stop_code} • Zone: {stopWithDirections.stop.zone_id}
+                      {stopWithDirections.stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                      <span className="ml-2 text-blue-600">• {stopWithDirections.routeDirections.length} route directions</span>
                     </div>
+                    
+                    {/* Route Directions Display */}
+                    {stopWithDirections.routeDirections.length > 0 && (
+                      <div className="space-y-1">
+                        {stopWithDirections.routeDirections.slice(0, 4).map((routeDir, index) => (
+                          <div key={`${routeDir.route.route_id}-${routeDir.direction}`} className="flex items-center gap-2 text-xs">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                              routeDir.route.route_color === '8EBF42' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {routeDir.route.route_short_name}
+                            </span>
+                            <span className={`text-xs font-medium ${
+                              routeDir.direction === 0 ? 'text-blue-600' : 'text-purple-600'
+                            }`}>
+                              {routeDir.directionLabel}
+                            </span>
+                            <span className="text-gray-500">→</span>
+                            <span className="text-gray-700 truncate max-w-[120px]" title={routeDir.finalDestination}>
+                              {routeDir.finalDestination}
+                            </span>
+                          </div>
+                        ))}
+                        {stopWithDirections.routeDirections.length > 4 && (
+                          <div className="text-xs text-gray-500 italic">
+                            +{stopWithDirections.routeDirections.length - 4} more directions...
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -700,21 +857,50 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             <Search className="absolute right-2 top-2.5 w-4 h-4 text-gray-400" />
             
             {showToDropdown && searchToTerm && filteredToStops.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredToStops.map(stop => (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                {filteredToStops.map(stopWithDirections => (
                   <button
-                    key={stop.stop_id}
-                    onClick={() => handleToStopSelect(stop)}
-                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                      toStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                    key={stopWithDirections.stop.stop_id}
+                    onClick={() => handleToStopSelect(stopWithDirections)}
+                    className={`w-full text-left px-3 py-4 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                      toStopId === stopWithDirections.stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
                     }`}
                   >
-                    <div className="font-medium text-sm">{stop.stop_name}</div>
-                    <div className="text-xs text-gray-600">
-                      Code: {stop.stop_code} • Zone: {stop.zone_id}
-                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                    <div className="font-medium text-sm mb-1">{stopWithDirections.stop.stop_name}</div>
+                    <div className="text-xs text-gray-600 mb-2">
+                      Code: {stopWithDirections.stop.stop_code} • Zone: {stopWithDirections.stop.zone_id}
+                      {stopWithDirections.stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                      <span className="ml-2 text-blue-600">• {stopWithDirections.routeDirections.length} route directions</span>
                     </div>
+                    
+                    {/* Route Directions Display */}
+                    {stopWithDirections.routeDirections.length > 0 && (
+                      <div className="space-y-1">
+                        {stopWithDirections.routeDirections.slice(0, 4).map((routeDir, index) => (
+                          <div key={`${routeDir.route.route_id}-${routeDir.direction}`} className="flex items-center gap-2 text-xs">
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                              routeDir.route.route_color === '8EBF42' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {routeDir.route.route_short_name}
+                            </span>
+                            <span className={`text-xs font-medium ${
+                              routeDir.direction === 0 ? 'text-blue-600' : 'text-purple-600'
+                            }`}>
+                              {routeDir.directionLabel}
+                            </span>
+                            <span className="text-gray-500">→</span>
+                            <span className="text-gray-700 truncate max-w-[120px]" title={routeDir.finalDestination}>
+                              {routeDir.finalDestination}
+                            </span>
+                          </div>
+                        ))}
+                        {stopWithDirections.routeDirections.length > 4 && (
+                          <div className="text-xs text-gray-500 italic">
+                            +{stopWithDirections.routeDirections.length - 4} more directions...
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -938,20 +1124,20 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           <Navigation className="w-12 h-12 text-blue-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">🚌 Enhanced Journey Planning</h3>
           <p className="text-gray-600 mb-4">
-            Standard GTFS times with Madrid timezone support and departure time filtering.
+            Route directions with final destinations • Standard GTFS times • Madrid timezone support
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
             <div className="space-y-2">
               <h4 className="font-semibold text-gray-900">🔍 Enhanced Features:</h4>
+              <p>• 🚌 Route directions (Inbound/Outbound)</p>
+              <p>• 🎯 Final destination display</p>
               <p>• 📅 Standard GTFS scheduling times</p>
               <p>• 🕐 Madrid timezone awareness</p>
-              <p>• ⏰ Departure time filtering</p>
-              <p>• 🚌 Direct routes prioritized</p>
             </div>
             <div className="space-y-2">
               <h4 className="font-semibold text-gray-900">🎯 Smart Logic:</h4>
-              <p>• Shows direct routes when available</p>
-              <p>• Only shows transfers if no direct route</p>
+              <p>• Shows where each route goes</p>
+              <p>• Direct routes prioritized</p>
               <p>• Respects your departure time</p>
               <p>• Uses official bus schedules</p>
             </div>
