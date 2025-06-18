@@ -21,12 +21,16 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   // Load notifications from localStorage on mount
   useEffect(() => {
+    console.log('🔄 Loading notifications from localStorage...');
+    
     const savedNotifications = localStorage.getItem('transit-notifications');
     const savedDismissed = localStorage.getItem('transit-dismissed-notifications');
     
     if (savedNotifications) {
       try {
         const parsed = JSON.parse(savedNotifications);
+        console.log('📥 Loaded notifications from storage:', parsed);
+        
         setNotifications(parsed.map((n: any) => ({
           ...n,
           startDate: n.startDate ? new Date(n.startDate) : undefined,
@@ -35,22 +39,27 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           updatedAt: new Date(n.updatedAt)
         })));
       } catch (error) {
-        console.error('Error loading notifications:', error);
+        console.error('❌ Error loading notifications:', error);
       }
+    } else {
+      console.log('📭 No saved notifications found');
     }
     
     if (savedDismissed) {
       try {
         setDismissedNotifications(new Set(JSON.parse(savedDismissed)));
       } catch (error) {
-        console.error('Error loading dismissed notifications:', error);
+        console.error('❌ Error loading dismissed notifications:', error);
       }
     }
   }, []);
 
   // Save notifications to localStorage whenever they change
   useEffect(() => {
-    localStorage.setItem('transit-notifications', JSON.stringify(notifications));
+    if (notifications.length > 0) {
+      console.log('💾 Saving notifications to localStorage:', notifications);
+      localStorage.setItem('transit-notifications', JSON.stringify(notifications));
+    }
   }, [notifications]);
 
   // Save dismissed notifications to localStorage
@@ -66,11 +75,20 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       updatedAt: new Date()
     };
     
-    setNotifications(prev => [...prev, newNotification]);
+    console.log('➕ Adding new notification:', newNotification);
+    
+    setNotifications(prev => {
+      const updated = [...prev, newNotification];
+      console.log('📋 Updated notifications list:', updated);
+      return updated;
+    });
+    
     return newNotification.id;
   }, []);
 
   const updateNotification = useCallback((id: string, updates: Partial<Notification>) => {
+    console.log('✏️ Updating notification:', id, updates);
+    
     setNotifications(prev => prev.map(notification => 
       notification.id === id 
         ? { ...notification, ...updates, updatedAt: new Date() }
@@ -79,6 +97,8 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   }, []);
 
   const removeNotification = useCallback((id: string) => {
+    console.log('🗑️ Removing notification:', id);
+    
     setNotifications(prev => prev.filter(notification => notification.id !== id));
     setDismissedNotifications(prev => {
       const newSet = new Set(prev);
@@ -88,6 +108,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
+    console.log('❌ Dismissing notification:', id);
     setDismissedNotifications(prev => new Set([...prev, id]));
   }, []);
 
@@ -104,7 +125,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   }, [dismissedNotifications]);
 
   const getNotificationsForPage = useCallback((page: string): Notification[] => {
-    return notifications.filter(notification => {
+    const filtered = notifications.filter(notification => {
       if (!isNotificationActive(notification)) return false;
       
       if (notification.scope === 'global') return true;
@@ -116,10 +137,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
       return priorityOrder[b.priority] - priorityOrder[a.priority];
     });
+    
+    console.log(`🔍 Notifications for page "${page}":`, filtered);
+    return filtered;
   }, [notifications, isNotificationActive]);
 
   const getNotificationsForRoute = useCallback((routeId: string, direction?: number): Notification[] => {
-    return notifications.filter(notification => {
+    const filtered = notifications.filter(notification => {
       if (!isNotificationActive(notification)) return false;
       
       if (notification.scope === 'global') return true;
@@ -135,10 +159,13 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
       return priorityOrder[b.priority] - priorityOrder[a.priority];
     });
+    
+    console.log(`🔍 Notifications for route "${routeId}" (direction: ${direction}):`, filtered);
+    return filtered;
   }, [notifications, isNotificationActive]);
 
   const getNotificationsForDeparture = useCallback((routeId: string, direction: number, time: string): Notification[] => {
-    return notifications.filter(notification => {
+    const filtered = notifications.filter(notification => {
       if (!isNotificationActive(notification)) return false;
       
       if (notification.scope === 'global') return true;
@@ -176,6 +203,9 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
       return priorityOrder[b.priority] - priorityOrder[a.priority];
     });
+    
+    console.log(`🔍 Notifications for departure "${routeId}" (${direction}) at ${time}:`, filtered);
+    return filtered;
   }, [notifications, isNotificationActive]);
 
   // Helper function to convert time string to minutes
@@ -184,8 +214,17 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     return hours * 60 + minutes;
   };
 
+  // Debug logging
+  useEffect(() => {
+    console.log('🔄 Notification context state updated:', {
+      totalNotifications: notifications.length,
+      activeNotifications: notifications.filter(n => n.isActive).length,
+      dismissedCount: dismissedNotifications.size
+    });
+  }, [notifications, dismissedNotifications]);
+
   const contextValue: NotificationContextType = {
-    notifications: notifications.filter(isNotificationActive),
+    notifications: notifications, // Return ALL notifications, not just active ones
     addNotification,
     updateNotification,
     removeNotification,
