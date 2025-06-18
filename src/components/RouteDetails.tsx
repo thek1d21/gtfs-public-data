@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Route, Trip, StopTime, Stop, Shape, RouteAnalytics } from '../types/gtfs';
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
-import { Bus, Clock, MapPin, Users, Accessibility, TrendingUp, Navigation, X, ArrowRight, Calendar, Zap, Route as RouteIcon } from 'lucide-react';
+import { Bus, Clock, MapPin, Users, Accessibility, TrendingUp, Navigation, X, ArrowRight, Calendar, Zap, Router as RouteIcon } from 'lucide-react';
 import { LatLngBounds } from 'leaflet';
 
 interface RouteDetailsProps {
