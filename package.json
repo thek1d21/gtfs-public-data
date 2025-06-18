@@ -14,7 +14,11 @@
     "leaflet": "^1.9.4",
     "react-leaflet": "^4.2.1",
     "lucide-react": "^0.263.1",
-    "papaparse": "^5.4.1"
+    "papaparse": "^5.4.1",
+    "recharts": "^2.8.0",
+    "date-fns": "^2.30.0",
+    "react-router-dom": "^6.15.0",
+    "framer-motion": "^10.16.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

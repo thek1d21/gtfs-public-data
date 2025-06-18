@@ -1,23 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { GTFSParser } from './utils/gtfsParser';
-import { Stop, Route, Agency, Calendar, FeedInfo } from './types/gtfs';
+import { 
+  Stop, Route, Agency, Calendar, FeedInfo, Trip, StopTime, Shape, 
+  Frequency, FareAttribute, FareRule, RouteAnalytics, ServicePattern, StopAnalytics 
+} from './types/gtfs';
 import { TransitMap } from './components/TransitMap';
 import { RouteList } from './components/RouteList';
 import { StatsPanel } from './components/StatsPanel';
 import { Header } from './components/Header';
 import { LoadingSpinner } from './components/LoadingSpinner';
+import { Navigation } from './components/Navigation';
+import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { ScheduleViewer } from './components/ScheduleViewer';
+import { ServiceCalendar } from './components/ServiceCalendar';
+import { RouteDetails } from './components/RouteDetails';
+
+interface GTFSData {
+  stops: Stop[];
+  routes: Route[];
+  agency: Agency[];
+  calendar: Calendar[];
+  feedInfo: FeedInfo[];
+  trips: Trip[];
+  stopTimes: StopTime[];
+  shapes: Shape[];
+  frequencies: Frequency[];
+  fareAttributes: FareAttribute[];
+  fareRules: FareRule[];
+  routeAnalytics: RouteAnalytics[];
+  servicePatterns: ServicePattern[];
+  stopAnalytics: StopAnalytics[];
+}
 
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<{
-    stops: Stop[];
-    routes: Route[];
-    agency: Agency[];
-    calendar: Calendar[];
-    feedInfo: FeedInfo[];
-  } | null>(null);
+  const [data, setData] = useState<GTFSData | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<string | undefined>();
+  const [activeTab, setActiveTab] = useState('overview');
+  const [selectedRouteDetails, setSelectedRouteDetails] = useState<Route | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -25,7 +46,7 @@ function App() {
         setLoading(true);
         const parser = new GTFSParser();
         const gtfsData = await parser.loadAllData();
-        setData(gtfsData);
+        setData(gtfsData as GTFSData);
       } catch (err) {
         console.error('Failed to load GTFS data:', err);
         setError('Failed to load transit data. Please try again later.');
@@ -36,6 +57,17 @@ function App() {
 
     loadData();
   }, []);
+
+  const handleRouteSelect = (routeId: string | undefined) => {
+    setSelectedRoute(routeId);
+    if (activeTab !== 'overview') {
+      setActiveTab('overview');
+    }
+  };
+
+  const handleRouteDetails = (route: Route) => {
+    setSelectedRouteDetails(route);
+  };
 
   if (loading) {
     return <LoadingSpinner />;
@@ -64,44 +96,87 @@ function App() {
 
   const feedInfo = data.feedInfo[0];
 
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'analytics':
+        return (
+          <AnalyticsDashboard
+            routeAnalytics={data.routeAnalytics}
+            servicePatterns={data.servicePatterns}
+            stopAnalytics={data.stopAnalytics}
+          />
+        );
+      case 'schedule':
+        return (
+          <ScheduleViewer
+            stopTimes={data.stopTimes}
+            trips={data.trips}
+            stops={data.stops}
+            routes={data.routes}
+          />
+        );
+      case 'calendar':
+        return (
+          <ServiceCalendar
+            calendar={data.calendar}
+            servicePatterns={data.servicePatterns}
+          />
+        );
+      default:
+        return (
+          <>
+            {/* Stats Panel */}
+            <div className="mb-6">
+              <StatsPanel 
+                stops={data.stops} 
+                routes={data.routes} 
+                calendar={data.calendar}
+                trips={data.trips}
+                stopTimes={data.stopTimes}
+                shapes={data.shapes}
+              />
+            </div>
+
+            {/* Main Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Sidebar */}
+              <div className="lg:col-span-1 space-y-6">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <RouteList
+                    routes={data.routes}
+                    selectedRoute={selectedRoute}
+                    onRouteSelect={handleRouteSelect}
+                    onRouteDetails={handleRouteDetails}
+                    routeAnalytics={data.routeAnalytics}
+                  />
+                </div>
+              </div>
+
+              {/* Map */}
+              <div className="lg:col-span-3">
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 h-[600px]">
+                  <TransitMap
+                    stops={data.stops}
+                    routes={data.routes}
+                    shapes={data.shapes}
+                    trips={data.trips}
+                    selectedRoute={selectedRoute}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        );
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Header feedInfo={feedInfo} />
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Stats Panel */}
-        <div className="mb-6">
-          <StatsPanel 
-            stops={data.stops} 
-            routes={data.routes} 
-            calendar={data.calendar} 
-          />
-        </div>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar */}
-          <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              <RouteList
-                routes={data.routes}
-                selectedRoute={selectedRoute}
-                onRouteSelect={setSelectedRoute}
-              />
-            </div>
-          </div>
-
-          {/* Map */}
-          <div className="lg:col-span-3">
-            <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 h-[600px]">
-              <TransitMap
-                stops={data.stops}
-                routes={data.routes}
-                selectedRoute={selectedRoute}
-              />
-            </div>
-          </div>
-        </div>
+        {renderContent()}
 
         {/* Footer Info */}
         <div className="mt-8 text-center text-sm text-gray-600">
@@ -110,10 +185,23 @@ function App() {
             Last updated: {feedInfo?.feed_version || 'Unknown'}
           </p>
           <p className="mt-1">
-            This dashboard visualizes Madrid's public bus network using GTFS data
+            Enhanced Madrid Transit Dashboard with comprehensive GTFS data analysis
           </p>
         </div>
       </main>
+
+      {/* Route Details Modal */}
+      {selectedRouteDetails && (
+        <RouteDetails
+          route={selectedRouteDetails}
+          trips={data.trips.filter(trip => trip.route_id === selectedRouteDetails.route_id)}
+          stopTimes={data.stopTimes}
+          stops={data.stops}
+          shapes={data.shapes}
+          analytics={data.routeAnalytics.find(ra => ra.route_id === selectedRouteDetails.route_id)!}
+          onClose={() => setSelectedRouteDetails(null)}
+        />
+      )}
     </div>
   );
 }
