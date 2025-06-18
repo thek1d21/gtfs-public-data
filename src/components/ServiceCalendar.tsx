@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, ServicePattern, Stop, Route, Trip, StopTime } from '../types/gtfs';
-import { Calendar as CalendarIcon, Clock, Users, Filter, Search, MapPin, Bus, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, Users, Filter, Search, MapPin, Bus, ArrowRight, ChevronLeft, ChevronRight, CheckCircle } from 'lucide-react';
 import { format, startOfWeek, addDays, isSameDay, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isToday, isBefore, isAfter } from 'date-fns';
 
 interface ServiceCalendarProps {
@@ -30,6 +30,7 @@ interface DepartureInfo {
   directionLabel: string;
   finalDestination: string;
   stopSequence: number;
+  stopName: string;
 }
 
 export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
@@ -40,13 +41,11 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
   trips,
   stopTimes
 }) => {
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
-  const [selectedStop, setSelectedStop] = useState<string>('');
+  // Step-by-step state management
+  const [step, setStep] = useState<'selectDay' | 'selectRoute' | 'viewDepartures'>('selectDay');
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [viewMode, setViewMode] = useState<'calendar' | 'departures'>('calendar');
-  const [showStopDropdown, setShowStopDropdown] = useState<boolean>(false);
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
 
   // Parse GTFS date format (YYYYMMDD)
   const parseGTFSDate = (dateStr: string): Date => {
@@ -85,9 +84,6 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
   const getScheduleType = (date: Date): 'weekday' | 'saturday' | 'sunday' | 'holiday' => {
     const dayOfWeek = getDay(date);
     
-    // TODO: Add holiday detection logic here
-    // For now, we'll use basic day-of-week logic
-    
     if (dayOfWeek === 0) return 'sunday';
     if (dayOfWeek === 6) return 'saturday';
     return 'weekday';
@@ -120,60 +116,83 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
         totalTrips: dayTrips.length,
         availableRoutes,
         isWeekend: scheduleType === 'saturday' || scheduleType === 'sunday',
-        isHoliday: false, // TODO: Implement holiday detection
+        isHoliday: false,
         scheduleType
       } as DaySchedule;
     });
   }, [currentMonth, calendar, trips, routes]);
 
-  // Get departures for selected date, stop, and route
-  const getDeparturesForDate = (date: Date, stopId?: string, routeId?: string): DepartureInfo[] => {
-    const activeServices = calendar.filter(service => isServiceActiveOnDate(service, date));
+  // Get available routes for selected date
+  const availableRoutesForDate = useMemo(() => {
+    if (!selectedDate) return [];
+    
+    const activeServices = calendar.filter(service => isServiceActiveOnDate(service, selectedDate));
     const serviceIds = activeServices.map(s => s.service_id);
+    const dayTrips = trips.filter(trip => serviceIds.includes(trip.service_id));
+    const routeIds = [...new Set(dayTrips.map(trip => trip.route_id))];
     
-    // Get trips for the selected date
-    let dayTrips = trips.filter(trip => serviceIds.includes(trip.service_id));
-    
-    // Filter by route if selected
-    if (routeId) {
-      dayTrips = dayTrips.filter(trip => trip.route_id === routeId);
+    return routes
+      .filter(route => routeIds.includes(route.route_id))
+      .sort((a, b) => a.route_short_name.localeCompare(b.route_short_name));
+  }, [selectedDate, calendar, trips, routes]);
+
+  // Get departures for selected date and route
+  const getDeparturesForDateAndRoute = (date: Date, routeId: string): DepartureInfo[] => {
+    try {
+      const activeServices = calendar.filter(service => isServiceActiveOnDate(service, date));
+      const serviceIds = activeServices.map(s => s.service_id);
+      
+      // Get trips for the selected date and route
+      const dayTrips = trips.filter(trip => 
+        serviceIds.includes(trip.service_id) && 
+        trip.route_id === routeId
+      );
+      
+      if (dayTrips.length === 0) return [];
+      
+      // Get stop times for the trips
+      const tripIds = dayTrips.map(trip => trip.trip_id);
+      const dayStopTimes = stopTimes.filter(st => 
+        tripIds.includes(st.trip_id) && 
+        st.departure_time // Only include times with departure
+      );
+      
+      // Convert to departure info with stop names
+      const departures: DepartureInfo[] = dayStopTimes
+        .map(st => {
+          const trip = dayTrips.find(t => t.trip_id === st.trip_id);
+          const route = routes.find(r => r.route_id === routeId);
+          const stop = stops.find(s => s.stop_id === st.stop_id);
+          
+          if (!trip || !route || !stop) return null;
+          
+          const directionLabel = trip.direction_id === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
+          const finalDestination = getFinalDestination(route.route_id, trip.direction_id, st.stop_id);
+          
+          return {
+            time: st.departure_time,
+            route,
+            trip,
+            direction: trip.direction_id,
+            directionLabel,
+            finalDestination,
+            stopSequence: st.stop_sequence,
+            stopName: stop.stop_name
+          };
+        })
+        .filter(Boolean) as DepartureInfo[];
+      
+      // Sort by stop sequence, then by departure time
+      return departures.sort((a, b) => {
+        if (a.stopSequence !== b.stopSequence) {
+          return a.stopSequence - b.stopSequence;
+        }
+        return a.time.localeCompare(b.time);
+      });
+    } catch (error) {
+      console.error('Error getting departures:', error);
+      return [];
     }
-    
-    // Get stop times for the trips
-    const tripIds = dayTrips.map(trip => trip.trip_id);
-    let dayStopTimes = stopTimes.filter(st => tripIds.includes(st.trip_id));
-    
-    // Filter by stop if selected
-    if (stopId) {
-      dayStopTimes = dayStopTimes.filter(st => st.stop_id === stopId);
-    }
-    
-    // Convert to departure info
-    const departures: DepartureInfo[] = dayStopTimes
-      .filter(st => st.departure_time) // Only include times with departure
-      .map(st => {
-        const trip = dayTrips.find(t => t.trip_id === st.trip_id);
-        const route = trip ? routes.find(r => r.route_id === trip.route_id) : null;
-        
-        if (!trip || !route) return null;
-        
-        const directionLabel = trip.direction_id === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
-        const finalDestination = getFinalDestination(route.route_id, trip.direction_id, st.stop_id);
-        
-        return {
-          time: st.departure_time,
-          route,
-          trip,
-          direction: trip.direction_id,
-          directionLabel,
-          finalDestination,
-          stopSequence: st.stop_sequence
-        };
-      })
-      .filter(Boolean) as DepartureInfo[];
-    
-    // Sort by departure time
-    return departures.sort((a, b) => a.time.localeCompare(b.time));
   };
 
   // Get final destination for a route direction
@@ -213,12 +232,6 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
       return 'Unknown destination';
     }
   };
-
-  // Filter stops for search
-  const filteredStops = stops.filter(stop => 
-    stop.stop_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    stop.stop_code.toLowerCase().includes(searchTerm.toLowerCase())
-  ).slice(0, 20);
 
   // Service type distribution
   const serviceTypeData = useMemo(() => {
@@ -289,14 +302,40 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
     setCurrentMonth(direction === 'next' ? addMonths(currentMonth, 1) : subMonths(currentMonth, 1));
   };
 
-  const handleStopSelect = (stop: Stop) => {
-    setSelectedStop(stop.stop_id);
-    setSearchTerm(stop.stop_name);
-    setShowStopDropdown(false);
+  const handleDateSelect = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedRoute('');
+    setStep('selectRoute');
   };
 
-  const selectedDateData = monthData.find(d => isSameDay(d.date, selectedDate));
-  const departures = selectedDateData ? getDeparturesForDate(selectedDate, selectedStop, selectedRoute) : [];
+  const handleRouteSelect = (routeId: string) => {
+    setSelectedRoute(routeId);
+    setStep('viewDepartures');
+  };
+
+  const resetSelection = () => {
+    setSelectedDate(null);
+    setSelectedRoute('');
+    setStep('selectDay');
+  };
+
+  const selectedDateData = selectedDate ? monthData.find(d => isSameDay(d.date, selectedDate)) : null;
+  const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
+  const departures = selectedDate && selectedRoute ? getDeparturesForDateAndRoute(selectedDate, selectedRoute) : [];
+
+  // Group departures by direction
+  const departuresByDirection = useMemo(() => {
+    const grouped = departures.reduce((acc, departure) => {
+      const key = departure.direction;
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+      acc[key].push(departure);
+      return acc;
+    }, {} as Record<number, DepartureInfo[]>);
+
+    return grouped;
+  }, [departures]);
 
   return (
     <div className="space-y-6">
@@ -319,40 +358,47 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
         ))}
       </div>
 
-      {/* View Mode Toggle */}
+      {/* Step-by-Step Process */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-        <div className="flex items-center justify-between mb-4">
+        {/* Progress Indicator */}
+        <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-gray-900">Service Calendar & Departures</h3>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setViewMode('calendar')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                viewMode === 'calendar'
-                  ? 'bg-madrid-primary text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <CalendarIcon className="w-4 h-4 inline mr-2" />
-              Calendar View
-            </button>
-            <button
-              onClick={() => setViewMode('departures')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                viewMode === 'departures'
-                  ? 'bg-madrid-primary text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <Clock className="w-4 h-4 inline mr-2" />
-              Departures View
-            </button>
+          <div className="flex items-center gap-4">
+            <div className={`flex items-center gap-2 ${step === 'selectDay' ? 'text-madrid-primary' : step !== 'selectDay' ? 'text-green-600' : 'text-gray-400'}`}>
+              {step !== 'selectDay' ? <CheckCircle className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center"><span className="text-xs font-bold">1</span></div>}
+              <span className="text-sm font-medium">Select Day</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-gray-400" />
+            <div className={`flex items-center gap-2 ${step === 'selectRoute' ? 'text-madrid-primary' : step === 'viewDepartures' ? 'text-green-600' : 'text-gray-400'}`}>
+              {step === 'viewDepartures' ? <CheckCircle className="w-5 h-5" /> : <div className="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center"><span className="text-xs font-bold">2</span></div>}
+              <span className="text-sm font-medium">Choose Route</span>
+            </div>
+            <ArrowRight className="w-4 h-4 text-gray-400" />
+            <div className={`flex items-center gap-2 ${step === 'viewDepartures' ? 'text-madrid-primary' : 'text-gray-400'}`}>
+              <div className="w-5 h-5 rounded-full border-2 border-current flex items-center justify-center"><span className="text-xs font-bold">3</span></div>
+              <span className="text-sm font-medium">View Departures</span>
+            </div>
           </div>
+          {(selectedDate || selectedRoute) && (
+            <button
+              onClick={resetSelection}
+              className="text-sm text-gray-500 hover:text-gray-700 font-medium"
+            >
+              Reset Selection
+            </button>
+          )}
         </div>
 
-        {viewMode === 'calendar' ? (
-          <>
+        {/* Step 1: Select Day */}
+        {step === 'selectDay' && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Step 1: Choose a Day</h4>
+              <p className="text-gray-600">Select any day from the calendar to see available bus routes</p>
+            </div>
+
             {/* Month Navigation */}
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between">
               <button
                 onClick={() => navigateMonth('prev')}
                 className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -373,7 +419,7 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
             </div>
 
             {/* Calendar Grid */}
-            <div className="grid grid-cols-7 gap-2 mb-4">
+            <div className="grid grid-cols-7 gap-2">
               {/* Day Headers */}
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
                 <div key={day} className="text-center p-3 font-medium text-gray-600 text-sm">
@@ -384,17 +430,18 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
               {/* Calendar Days */}
               {monthData.map((dayData, index) => {
                 const isCurrentMonth = dayData.date.getMonth() === currentMonth.getMonth();
-                const isSelected = isSameDay(dayData.date, selectedDate);
                 const isCurrentDay = isToday(dayData.date);
+                const hasService = dayData.totalTrips > 0;
                 
                 return (
                   <button
                     key={index}
-                    onClick={() => setSelectedDate(dayData.date)}
-                    className={`p-3 rounded-lg border-2 transition-all cursor-pointer min-h-[80px] ${
-                      isSelected 
-                        ? 'border-madrid-primary bg-madrid-primary/10' 
-                        : 'border-transparent hover:border-madrid-primary/50'
+                    onClick={() => hasService ? handleDateSelect(dayData.date) : null}
+                    disabled={!hasService}
+                    className={`p-3 rounded-lg border-2 transition-all min-h-[80px] ${
+                      hasService 
+                        ? 'cursor-pointer border-transparent hover:border-madrid-primary/50' 
+                        : 'cursor-not-allowed opacity-50'
                     } ${
                       !isCurrentMonth ? 'opacity-30' : ''
                     } ${
@@ -412,63 +459,28 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
                         {dayData.scheduleType === 'saturday' && '🎯 Saturday'}
                         {dayData.scheduleType === 'sunday' && '🌟 Sunday'}
                       </div>
-                      <div className="text-xs">
-                        <div className="font-medium text-gray-900">{dayData.totalTrips}</div>
-                        <div className="text-gray-600">trips</div>
-                      </div>
-                      <div className="text-xs">
-                        <div className="font-medium text-gray-900">{dayData.availableRoutes.length}</div>
-                        <div className="text-gray-600">routes</div>
-                      </div>
+                      {hasService ? (
+                        <>
+                          <div className="text-xs">
+                            <div className="font-medium text-gray-900">{dayData.totalTrips}</div>
+                            <div className="text-gray-600">trips</div>
+                          </div>
+                          <div className="text-xs">
+                            <div className="font-medium text-gray-900">{dayData.availableRoutes.length}</div>
+                            <div className="text-gray-600">routes</div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-gray-500">No Service</div>
+                      )}
                     </div>
                   </button>
                 );
               })}
             </div>
 
-            {/* Selected Date Info */}
-            {selectedDateData && (
-              <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-lg font-semibold text-blue-900">
-                    {format(selectedDate, 'EEEE, MMMM d, yyyy')}
-                  </h4>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    selectedDateData.scheduleType === 'weekday' ? 'bg-green-100 text-green-800' :
-                    selectedDateData.scheduleType === 'saturday' ? 'bg-blue-100 text-blue-800' :
-                    'bg-purple-100 text-purple-800'
-                  }`}>
-                    {selectedDateData.scheduleType.charAt(0).toUpperCase() + selectedDateData.scheduleType.slice(1)} Schedule
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="bg-white rounded-lg p-3 text-center">
-                    <div className="text-2xl font-bold text-blue-600">{selectedDateData.activeServices.length}</div>
-                    <div className="text-blue-700">Active Services</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 text-center">
-                    <div className="text-2xl font-bold text-green-600">{selectedDateData.totalTrips}</div>
-                    <div className="text-green-700">Total Trips</div>
-                  </div>
-                  <div className="bg-white rounded-lg p-3 text-center">
-                    <div className="text-2xl font-bold text-purple-600">{selectedDateData.availableRoutes.length}</div>
-                    <div className="text-purple-700">Available Routes</div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setViewMode('departures')}
-                  className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <Clock className="w-4 h-4" />
-                  View Departures for This Day
-                </button>
-              </div>
-            )}
-
             {/* Legend */}
-            <div className="mt-6 flex items-center justify-center gap-6 text-sm">
+            <div className="flex items-center justify-center gap-6 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-madrid-primary rounded"></div>
                 <span className="text-gray-600">High Service</span>
@@ -486,170 +498,170 @@ export const ServiceCalendar: React.FC<ServiceCalendarProps> = ({
                 <span className="text-gray-600">No Service</span>
               </div>
             </div>
-          </>
-        ) : (
-          <>
-            {/* Departures View */}
-            <div className="space-y-6">
-              {/* Date and Filters */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {/* Date Selector */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <CalendarIcon className="w-4 h-4 inline mr-1" />
-                    Select Date
-                  </label>
-                  <input
-                    type="date"
-                    value={format(selectedDate, 'yyyy-MM-dd')}
-                    onChange={(e) => setSelectedDate(new Date(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-madrid-primary focus:border-transparent"
-                  />
-                </div>
+          </div>
+        )}
 
-                {/* Stop Selector */}
-                <div className="relative">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <MapPin className="w-4 h-4 inline mr-1" />
-                    Stop (Optional)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => {
-                        setSearchTerm(e.target.value);
-                        setShowStopDropdown(true);
-                        if (!e.target.value) setSelectedStop('');
-                      }}
-                      onFocus={() => setShowStopDropdown(true)}
-                      placeholder="Search stops..."
-                      className="w-full px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:ring-2 focus:ring-madrid-primary focus:border-transparent"
-                    />
-                    <Search className="absolute right-2 top-2.5 w-4 h-4 text-gray-400" />
-                    
-                    {showStopDropdown && searchTerm && filteredStops.length > 0 && (
-                      <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                        {filteredStops.map(stop => (
-                          <button
-                            key={stop.stop_id}
-                            onClick={() => handleStopSelect(stop)}
-                            className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                              selectedStop === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
-                            }`}
-                          >
-                            <div className="font-medium text-sm">{stop.stop_name}</div>
-                            <div className="text-xs text-gray-600">
-                              Code: {stop.stop_code} • Zone: {stop.zone_id}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+        {/* Step 2: Select Route */}
+        {step === 'selectRoute' && selectedDate && selectedDateData && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Step 2: Choose a Route</h4>
+              <p className="text-gray-600">
+                Select a bus route for <strong>{format(selectedDate, 'EEEE, MMMM d, yyyy')}</strong>
+              </p>
+            </div>
 
-                {/* Route Selector */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Bus className="w-4 h-4 inline mr-1" />
-                    Route (Optional)
-                  </label>
-                  <select
-                    value={selectedRoute}
-                    onChange={(e) => setSelectedRoute(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-madrid-primary focus:border-transparent"
-                  >
-                    <option value="">All Routes</option>
-                    {selectedDateData?.availableRoutes.map(route => (
-                      <option key={route.route_id} value={route.route_id}>
-                        {route.route_short_name} - {route.route_long_name}
-                      </option>
-                    ))}
-                  </select>
+            {/* Selected Date Info */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between mb-3">
+                <h5 className="text-lg font-semibold text-blue-900">
+                  {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+                </h5>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  selectedDateData.scheduleType === 'weekday' ? 'bg-green-100 text-green-800' :
+                  selectedDateData.scheduleType === 'saturday' ? 'bg-blue-100 text-blue-800' :
+                  'bg-purple-100 text-purple-800'
+                }`}>
+                  {selectedDateData.scheduleType.charAt(0).toUpperCase() + selectedDateData.scheduleType.slice(1)} Schedule
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="bg-white rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-blue-600">{selectedDateData.activeServices.length}</div>
+                  <div className="text-blue-700">Active Services</div>
                 </div>
-
-                {/* Clear Filters */}
-                <div className="flex items-end">
-                  <button
-                    onClick={() => {
-                      setSelectedStop('');
-                      setSelectedRoute('');
-                      setSearchTerm('');
-                      setShowStopDropdown(false);
-                    }}
-                    className="w-full px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors text-sm font-medium"
-                  >
-                    Clear Filters
-                  </button>
+                <div className="bg-white rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-600">{selectedDateData.totalTrips}</div>
+                  <div className="text-green-700">Total Trips</div>
+                </div>
+                <div className="bg-white rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-purple-600">{availableRoutesForDate.length}</div>
+                  <div className="text-purple-700">Available Routes</div>
                 </div>
               </div>
+            </div>
 
-              {/* Departures Results */}
-              {departures.length > 0 ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-lg font-semibold text-gray-900">
-                      Departures for {format(selectedDate, 'EEEE, MMMM d')}
-                    </h4>
-                    <span className="text-sm text-gray-600">
-                      {departures.length} departures found
-                    </span>
+            {/* Available Routes */}
+            {availableRoutesForDate.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableRoutesForDate.map(route => (
+                  <button
+                    key={route.route_id}
+                    onClick={() => handleRouteSelect(route.route_id)}
+                    className="p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 hover:border-madrid-primary transition-all text-left"
+                  >
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`route-badge ${route.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
+                        {route.route_short_name}
+                      </div>
+                      <Bus className="w-4 h-4 text-gray-600" />
+                    </div>
+                    <h6 className="font-medium text-gray-900 mb-1">{route.route_long_name}</h6>
+                    {route.route_desc && (
+                      <p className="text-xs text-gray-600">{route.route_desc}</p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-gray-50 rounded-lg">
+                <Bus className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h5 className="text-lg font-semibold text-gray-900 mb-2">No Routes Available</h5>
+                <p className="text-gray-600">No bus routes are available for the selected date.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Step 3: View Departures */}
+        {step === 'viewDepartures' && selectedDate && selectedRoute && selectedRouteData && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Step 3: Departures</h4>
+              <p className="text-gray-600">
+                All departures for Route <strong>{selectedRouteData.route_short_name}</strong> on <strong>{format(selectedDate, 'EEEE, MMMM d')}</strong>
+              </p>
+            </div>
+
+            {/* Route and Date Info */}
+            <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className={`route-badge ${selectedRouteData.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
+                    {selectedRouteData.route_short_name}
                   </div>
+                  <div>
+                    <h5 className="font-semibold text-green-900">{selectedRouteData.route_long_name}</h5>
+                    <p className="text-sm text-green-700">{format(selectedDate, 'EEEE, MMMM d, yyyy')}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-green-600">{departures.length}</div>
+                  <div className="text-sm text-green-700">Total Departures</div>
+                </div>
+              </div>
+            </div>
 
-                  <div className="grid gap-3">
-                    {departures.map((departure, index) => (
-                      <div key={index} className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className="text-2xl font-bold text-madrid-primary">
-                              {formatTime(departure.time)}
-                            </div>
-                            <div className={`route-badge ${departure.route.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
-                              {departure.route.route_short_name}
-                            </div>
-                            <div>
-                              <div className="font-medium text-gray-900">{departure.route.route_long_name}</div>
-                              <div className="text-sm text-gray-600">
-                                {departure.directionLabel} → {departure.finalDestination}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right text-sm text-gray-600">
-                            <div>Stop #{departure.stopSequence}</div>
-                            <div>Trip: {departure.trip.trip_id.slice(-6)}</div>
-                          </div>
+            {/* Departures by Direction */}
+            {Object.keys(departuresByDirection).length > 0 ? (
+              <div className="space-y-6">
+                {Object.entries(departuresByDirection).map(([direction, directionDepartures]) => {
+                  const directionLabel = parseInt(direction) === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
+                  const directionColor = parseInt(direction) === 0 ? 'blue' : 'purple';
+                  
+                  return (
+                    <div key={direction} className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`px-4 py-2 rounded-lg ${
+                          directionColor === 'blue' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                        }`}>
+                          <h5 className="font-semibold">{directionLabel}</h5>
+                          <p className="text-sm">
+                            → {directionDepartures[0]?.finalDestination || 'Terminal'}
+                          </p>
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {directionDepartures.length} departures
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg">
-                  <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">No Departures Found</h3>
-                  <p className="text-gray-600 mb-4">
-                    No departures found for the selected date and filters.
-                  </p>
-                  <div className="text-sm text-gray-500 space-y-1">
-                    <p>• Try selecting a different date</p>
-                    <p>• Remove stop or route filters</p>
-                    <p>• Check if service is available on {format(selectedDate, 'EEEE')}s</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
+
+                      <div className="grid gap-2">
+                        {directionDepartures.map((departure, index) => (
+                          <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <div className="flex items-center gap-4">
+                              <div className="text-lg font-bold text-madrid-primary">
+                                {formatTime(departure.time)}
+                              </div>
+                              <div>
+                                <div className="font-medium text-gray-900">{departure.stopName}</div>
+                                <div className="text-sm text-gray-600">
+                                  Stop #{departure.stopSequence} • Trip: {departure.trip.trip_id.slice(-6)}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right text-sm text-gray-600">
+                              <div>→ {departure.finalDestination}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-gray-50 rounded-lg">
+                <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <h5 className="text-lg font-semibold text-gray-900 mb-2">No Departures Found</h5>
+                <p className="text-gray-600">
+                  No departures found for Route {selectedRouteData.route_short_name} on {format(selectedDate, 'EEEE, MMMM d')}.
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
-
-      {/* Click outside to close dropdowns */}
-      {showStopDropdown && (
-        <div 
-          className="fixed inset-0 z-10" 
-          onClick={() => setShowStopDropdown(false)}
-        />
-      )}
     </div>
   );
 };
