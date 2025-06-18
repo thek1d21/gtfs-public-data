@@ -35,15 +35,17 @@ const selectedStopIcon = createCustomIcon('#FFB800', 28, true);
 const routeStopIcon = createCustomIcon('#00A8E6', 26, true);
 const routeStopHighlighted = createCustomIcon('#0066CC', 30, true);
 
-// Simplified and stable Route Polyline Component - inspired by your demo
-function StableRoutePolylines({ 
+// Enhanced Route Polylines with Direction-Based Colors
+function EnhancedRoutePolylines({ 
   shapes, 
   selectedRoute, 
-  routes 
+  routes,
+  trips 
 }: { 
   shapes: Shape[], 
   selectedRoute?: string, 
-  routes: Route[] 
+  routes: Route[],
+  trips: Trip[]
 }) {
   const [routeLines, setRouteLines] = useState<Array<{
     id: string;
@@ -52,6 +54,8 @@ function StableRoutePolylines({
     weight: number;
     opacity: number;
     dashArray?: string;
+    direction: number;
+    label: string;
   }>>([]);
 
   useEffect(() => {
@@ -61,7 +65,23 @@ function StableRoutePolylines({
     }
 
     try {
-      // Simple approach: Group shapes by shape_id and render each as a separate polyline
+      // Get route trips to determine directions
+      const routeTrips = trips.filter(trip => trip.route_id === selectedRoute);
+      const route = routes.find(r => r.route_id === selectedRoute);
+      const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
+      
+      // Create color variations for directions
+      const getDirectionColor = (direction: number, baseColor: string) => {
+        if (direction === 0) {
+          // Direction 0 (Outbound/Ida) - Use original color, more saturated
+          return baseColor;
+        } else {
+          // Direction 1 (Inbound/Vuelta) - Use complementary/darker shade
+          return adjustColorForDirection(baseColor);
+        }
+      };
+
+      // Group shapes by shape_id and link to trip directions
       const shapeGroups = shapes.reduce((acc, shape) => {
         if (!shape?.shape_id || typeof shape.shape_pt_lat !== 'number' || typeof shape.shape_pt_lon !== 'number') {
           return acc;
@@ -74,13 +94,14 @@ function StableRoutePolylines({
         return acc;
       }, {} as Record<string, Shape[]>);
 
-      const route = routes.find(r => r.route_id === selectedRoute);
-      const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
-
-      // Create simple polylines - no complex logic
+      // Create polylines with direction-based styling
       const lines = Object.entries(shapeGroups)
         .filter(([_, shapePoints]) => shapePoints && shapePoints.length > 1)
-        .map(([shapeId, shapePoints], index) => {
+        .map(([shapeId, shapePoints]) => {
+          // Find trip that uses this shape to determine direction
+          const tripWithShape = routeTrips.find(trip => trip.shape_id === shapeId);
+          const direction = tripWithShape?.direction_id || 0;
+          
           const sortedPoints = shapePoints
             .filter(point => point && typeof point.shape_pt_lat === 'number' && typeof point.shape_pt_lon === 'number')
             .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
@@ -88,13 +109,18 @@ function StableRoutePolylines({
 
           if (sortedPoints.length < 2) return null;
 
+          const directionColor = getDirectionColor(direction, baseColor);
+          const directionLabel = direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
+
           return {
             id: shapeId,
             positions: sortedPoints,
-            color: baseColor,
-            weight: index === 0 ? 5 : 3,
-            opacity: 0.7,
-            dashArray: index === 0 ? undefined : '8,4'
+            color: directionColor,
+            weight: direction === 0 ? 6 : 5, // Slightly thicker for outbound
+            opacity: 0.8,
+            dashArray: direction === 0 ? undefined : '12,8', // Dashed for inbound
+            direction,
+            label: directionLabel
           };
         })
         .filter(Boolean) as Array<{
@@ -104,6 +130,8 @@ function StableRoutePolylines({
           weight: number;
           opacity: number;
           dashArray?: string;
+          direction: number;
+          label: string;
         }>;
 
       setRouteLines(lines);
@@ -111,9 +139,30 @@ function StableRoutePolylines({
       console.error('Error processing route shapes:', error);
       setRouteLines([]);
     }
-  }, [shapes, selectedRoute, routes]);
+  }, [shapes, selectedRoute, routes, trips]);
 
-  // Simple rendering - similar to your demo approach
+  // Helper function to adjust color for direction
+  const adjustColorForDirection = (hexColor: string): string => {
+    // Remove # if present
+    const color = hexColor.replace('#', '');
+    
+    // Convert to RGB
+    const r = parseInt(color.substr(0, 2), 16);
+    const g = parseInt(color.substr(2, 2), 16);
+    const b = parseInt(color.substr(4, 2), 16);
+    
+    // Create a complementary/darker shade for inbound
+    // Method: Darken and shift hue slightly
+    const newR = Math.max(0, Math.floor(r * 0.7));
+    const newG = Math.max(0, Math.floor(g * 0.7));
+    const newB = Math.min(255, Math.floor(b * 1.2)); // Slight blue shift
+    
+    // Convert back to hex
+    const toHex = (n: number) => n.toString(16).padStart(2, '0');
+    return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+  };
+
+  // Enhanced rendering with direction information
   return (
     <>
       {routeLines.map((line) => (
@@ -343,7 +392,22 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     return route?.route_color ? `#${route.route_color}` : '#0066CC';
   };
 
+  // Get direction information for selected route
+  const getRouteDirections = () => {
+    if (!selectedRoute) return [];
+    
+    const routeTripsData = trips.filter(trip => trip.route_id === selectedRoute);
+    const directions = [...new Set(routeTripsData.map(trip => trip.direction_id))];
+    
+    return directions.map(dir => ({
+      direction: dir,
+      label: dir === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)',
+      trips: routeTripsData.filter(trip => trip.direction_id === dir).length
+    }));
+  };
+
   const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
+  const routeDirections = getRouteDirections();
 
   return (
     <div className="h-full w-full relative">
@@ -367,11 +431,12 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           routeStops={routeStops}
         />
         
-        {/* Stable Route Polylines - simplified approach */}
-        <StableRoutePolylines
+        {/* Enhanced Route Polylines with Direction Colors */}
+        <EnhancedRoutePolylines
           shapes={routeShapes}
           selectedRoute={selectedRoute}
           routes={routes}
+          trips={trips}
         />
         
         {/* Enhanced Stops - Only show filtered stops */}
@@ -546,7 +611,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         })}
       </MapContainer>
 
-      {/* Enhanced Route Details Panel */}
+      {/* Enhanced Route Details Panel with Direction Info */}
       {selectedRoute && selectedRouteData && (
         <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-lg p-4 z-[1000] max-w-sm border border-gray-200">
           <div className="flex items-center gap-3 mb-3">
@@ -566,6 +631,27 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Direction Information */}
+          {routeDirections.length > 1 && (
+            <div className="mb-3 p-2 bg-gray-50 rounded-lg">
+              <h4 className="text-xs font-semibold text-gray-700 mb-2">Route Directions:</h4>
+              <div className="space-y-1">
+                {routeDirections.map((dir, index) => (
+                  <div key={dir.direction} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className={`w-3 h-1 rounded ${index === 0 ? 'bg-current' : 'border-b-2 border-dashed border-current'}`}
+                        style={{ color: getRouteColor(selectedRoute) }}
+                      ></div>
+                      <span className="text-gray-700">{dir.label}</span>
+                    </div>
+                    <span className="text-gray-600 font-medium">{dir.trips} trips</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div className="bg-blue-50 rounded-lg p-3 text-center">
@@ -591,7 +677,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         </div>
       )}
 
-      {/* Enhanced Legend */}
+      {/* Enhanced Legend with Direction Colors */}
       <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-lg p-3 z-[1000] border border-gray-200">
         <h4 className="text-xs font-bold text-gray-900 mb-2">Legend</h4>
         <div className="space-y-1 text-xs">
@@ -617,8 +703,12 @@ export const TransitMap: React.FC<TransitMapProps> = ({
                 <span className="text-gray-700">Major Hub</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-1 bg-blue-600 rounded"></div>
-                <span className="text-gray-700">Route Path</span>
+                <div className="w-4 h-1 rounded" style={{ backgroundColor: getRouteColor(selectedRoute) }}></div>
+                <span className="text-gray-700">Outbound (Ida)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-1 border-b-2 border-dashed" style={{ borderColor: getRouteColor(selectedRoute) }}></div>
+                <span className="text-gray-700">Inbound (Vuelta)</span>
               </div>
             </>
           )}
@@ -630,7 +720,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-4 py-2 z-[1000] shadow-lg">
           <div className="flex items-center gap-2 text-sm font-medium">
             <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-            <span>Route Focus Mode • {routeStops.length} stops • Zoomed to fit</span>
+            <span>Route Focus Mode • {routeStops.length} stops • Both directions shown</span>
           </div>
         </div>
       )}
