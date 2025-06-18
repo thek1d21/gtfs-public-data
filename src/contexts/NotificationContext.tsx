@@ -18,93 +18,78 @@ interface NotificationProviderProps {
 export const NotificationProvider: React.FC<NotificationProviderProps> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [dismissedNotifications, setDismissedNotifications] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load notifications from localStorage on mount
+  // 🚀 LOAD STATIC NOTIFICATIONS FROM JSON FILE
   useEffect(() => {
-    console.log('🔄 Loading notifications from localStorage...');
-    
-    const savedNotifications = localStorage.getItem('transit-notifications');
-    const savedDismissed = localStorage.getItem('transit-dismissed-notifications');
-    
-    if (savedNotifications) {
+    const loadStaticNotifications = async () => {
       try {
-        const parsed = JSON.parse(savedNotifications);
-        console.log('📥 Loaded notifications from storage:', parsed);
+        console.log('📥 Loading static notifications from /notifications.json...');
         
-        setNotifications(parsed.map((n: any) => ({
+        const response = await fetch('/notifications.json');
+        if (!response.ok) {
+          throw new Error(`Failed to load notifications: ${response.status}`);
+        }
+        
+        const staticNotifications = await response.json();
+        console.log('✅ Loaded static notifications:', staticNotifications);
+        
+        // Parse dates and set notifications
+        const parsedNotifications = staticNotifications.map((n: any) => ({
           ...n,
           startDate: n.startDate ? new Date(n.startDate) : undefined,
           endDate: n.endDate ? new Date(n.endDate) : undefined,
           createdAt: new Date(n.createdAt),
           updatedAt: new Date(n.updatedAt)
-        })));
+        }));
+        
+        setNotifications(parsedNotifications);
+        console.log(`🎯 Set ${parsedNotifications.length} static notifications`);
+        
       } catch (error) {
-        console.error('❌ Error loading notifications:', error);
+        console.error('❌ Error loading static notifications:', error);
+        // Set empty array on error
+        setNotifications([]);
+      } finally {
+        setIsLoading(false);
       }
-    } else {
-      console.log('📭 No saved notifications found');
-    }
-    
+    };
+
+    loadStaticNotifications();
+  }, []);
+
+  // Load dismissed notifications from localStorage
+  useEffect(() => {
+    const savedDismissed = localStorage.getItem('transit-dismissed-notifications');
     if (savedDismissed) {
       try {
         setDismissedNotifications(new Set(JSON.parse(savedDismissed)));
+        console.log('📋 Loaded dismissed notifications from localStorage');
       } catch (error) {
         console.error('❌ Error loading dismissed notifications:', error);
       }
     }
   }, []);
 
-  // Save notifications to localStorage whenever they change
-  useEffect(() => {
-    if (notifications.length > 0) {
-      console.log('💾 Saving notifications to localStorage:', notifications);
-      localStorage.setItem('transit-notifications', JSON.stringify(notifications));
-    }
-  }, [notifications]);
-
   // Save dismissed notifications to localStorage
   useEffect(() => {
     localStorage.setItem('transit-dismissed-notifications', JSON.stringify(Array.from(dismissedNotifications)));
   }, [dismissedNotifications]);
 
-  const addNotification = useCallback((notificationData: Omit<Notification, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newNotification: Notification = {
-      ...notificationData,
-      id: `notification-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    console.log('➕ Adding new notification:', newNotification);
-    
-    setNotifications(prev => {
-      const updated = [...prev, newNotification];
-      console.log('📋 Updated notifications list:', updated);
-      return updated;
-    });
-    
-    return newNotification.id;
+  // 🚫 REMOVE ADMIN FUNCTIONS - Static notifications are read-only
+  const addNotification = useCallback(() => {
+    console.warn('⚠️ Cannot add notifications - using static JSON file');
+    throw new Error('Notifications are managed via static JSON file');
   }, []);
 
-  const updateNotification = useCallback((id: string, updates: Partial<Notification>) => {
-    console.log('✏️ Updating notification:', id, updates);
-    
-    setNotifications(prev => prev.map(notification => 
-      notification.id === id 
-        ? { ...notification, ...updates, updatedAt: new Date() }
-        : notification
-    ));
+  const updateNotification = useCallback(() => {
+    console.warn('⚠️ Cannot update notifications - using static JSON file');
+    throw new Error('Notifications are managed via static JSON file');
   }, []);
 
-  const removeNotification = useCallback((id: string) => {
-    console.log('🗑️ Removing notification:', id);
-    
-    setNotifications(prev => prev.filter(notification => notification.id !== id));
-    setDismissedNotifications(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(id);
-      return newSet;
-    });
+  const removeNotification = useCallback(() => {
+    console.warn('⚠️ Cannot remove notifications - using static JSON file');
+    throw new Error('Notifications are managed via static JSON file');
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
@@ -216,15 +201,18 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   // Debug logging
   useEffect(() => {
-    console.log('🔄 Notification context state updated:', {
-      totalNotifications: notifications.length,
-      activeNotifications: notifications.filter(n => n.isActive).length,
-      dismissedCount: dismissedNotifications.size
-    });
-  }, [notifications, dismissedNotifications]);
+    if (!isLoading) {
+      console.log('🔄 Static notification system ready:', {
+        totalNotifications: notifications.length,
+        activeNotifications: notifications.filter(n => n.isActive).length,
+        dismissedCount: dismissedNotifications.size,
+        source: 'Static JSON file (/notifications.json)'
+      });
+    }
+  }, [notifications, dismissedNotifications, isLoading]);
 
   const contextValue: NotificationContextType = {
-    notifications: notifications, // Return ALL notifications, not just active ones
+    notifications: notifications.filter(isNotificationActive),
     addNotification,
     updateNotification,
     removeNotification,
@@ -233,6 +221,15 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     getNotificationsForRoute,
     getNotificationsForDeparture
   };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <NotificationContext.Provider value={contextValue}>
+        {children}
+      </NotificationContext.Provider>
+    );
+  }
 
   return (
     <NotificationContext.Provider value={contextValue}>
