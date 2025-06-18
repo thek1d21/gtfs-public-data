@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { Icon, LatLngBounds } from 'leaflet';
 import { Stop, Route, Shape, Trip, StopTime } from '../types/gtfs';
 import { MapPin, Bus, Accessibility, Navigation, Info, Clock, ArrowRight, Router as RouteIcon } from 'lucide-react';
@@ -35,7 +35,7 @@ const selectedStopIcon = createCustomIcon('#FFB800', 28, true);
 const routeStopIcon = createCustomIcon('#00A8E6', 26, true);
 const routeStopHighlighted = createCustomIcon('#0066CC', 30, true);
 
-// Enhanced Route Polyline Component with smooth rendering and road snapping
+// Fixed Route Polyline Component - addresses the canvas error
 function RoutePolylines({ 
   shapes, 
   selectedRoute, 
@@ -55,56 +55,21 @@ function RoutePolylines({
     isMain: boolean;
   }>>([]);
 
-  // Smooth line interpolation function
-  const smoothLinePoints = (points: [number, number][]): [number, number][] => {
-    if (points.length < 3) return points;
-    
-    const smoothed: [number, number][] = [points[0]];
-    
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = points[i - 1];
-      const curr = points[i];
-      const next = points[i + 1];
-      
-      // Simple smoothing algorithm
-      const smoothLat = (prev[0] + curr[0] + next[0]) / 3;
-      const smoothLon = (prev[1] + curr[1] + next[1]) / 3;
-      
-      smoothed.push([smoothLat, smoothLon]);
-    }
-    
-    smoothed.push(points[points.length - 1]);
-    return smoothed;
-  };
-
-  // Reduce point density for smoother rendering
-  const simplifyLine = (points: [number, number][], tolerance: number = 0.0001): [number, number][] => {
-    if (points.length <= 2) return points;
-    
-    const simplified: [number, number][] = [points[0]];
-    
-    for (let i = 1; i < points.length - 1; i++) {
-      const prev = simplified[simplified.length - 1];
-      const curr = points[i];
-      
-      // Calculate distance
-      const distance = Math.sqrt(
-        Math.pow(curr[0] - prev[0], 2) + Math.pow(curr[1] - prev[1], 2)
-      );
-      
-      if (distance > tolerance) {
-        simplified.push(curr);
-      }
-    }
-    
-    simplified.push(points[points.length - 1]);
-    return simplified;
-  };
-
+  // Key fix: Ensure we have valid data before rendering
   useEffect(() => {
-    if (selectedRoute && shapes.length > 0) {
+    if (!selectedRoute || !shapes || shapes.length === 0) {
+      setRouteLines([]);
+      return;
+    }
+
+    try {
       // Group shapes by shape_id for different itineraries
       const shapeGroups = shapes.reduce((acc, shape) => {
+        // Validate shape data
+        if (!shape || !shape.shape_id || typeof shape.shape_pt_lat !== 'number' || typeof shape.shape_pt_lon !== 'number') {
+          return acc;
+        }
+        
         if (!acc[shape.shape_id]) {
           acc[shape.shape_id] = [];
         }
@@ -117,52 +82,72 @@ function RoutePolylines({
       const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
 
       // Create polyline data for each shape/itinerary
-      const lines = Object.entries(shapeGroups).map(([shapeId, shapePoints], index) => {
-        const sortedPoints = shapePoints
-          .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
-          .map(point => [point.shape_pt_lat, point.shape_pt_lon] as [number, number]);
+      const lines = Object.entries(shapeGroups)
+        .filter(([shapeId, shapePoints]) => shapePoints && shapePoints.length > 1) // Ensure we have enough points
+        .map(([shapeId, shapePoints], index) => {
+          const sortedPoints = shapePoints
+            .filter(point => point && typeof point.shape_pt_lat === 'number' && typeof point.shape_pt_lon === 'number')
+            .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
+            .map(point => [point.shape_pt_lat, point.shape_pt_lon] as [number, number]);
 
-        // Apply smoothing and simplification
-        const simplifiedPoints = simplifyLine(sortedPoints, 0.00005);
-        const smoothedPoints = smoothLinePoints(simplifiedPoints);
+          // Validate we have valid coordinates
+          if (sortedPoints.length < 2) return null;
 
-        const isMainItinerary = index === 0;
-        
-        return {
-          id: shapeId,
-          positions: smoothedPoints,
-          color: baseColor,
-          weight: isMainItinerary ? 8 : 6,
-          opacity: 0.9,
-          dashArray: isMainItinerary ? undefined : '15,10',
-          isMain: isMainItinerary
-        };
-      });
+          const isMainItinerary = index === 0;
+          
+          return {
+            id: shapeId,
+            positions: sortedPoints,
+            color: baseColor,
+            weight: isMainItinerary ? 6 : 4,
+            opacity: 0.8,
+            dashArray: isMainItinerary ? undefined : '10,5',
+            isMain: isMainItinerary
+          };
+        })
+        .filter(Boolean) as Array<{
+          id: string;
+          positions: [number, number][];
+          color: string;
+          weight: number;
+          opacity: number;
+          dashArray?: string;
+          isMain: boolean;
+        }>;
 
       setRouteLines(lines);
-    } else {
+    } catch (error) {
+      console.error('Error processing route shapes:', error);
       setRouteLines([]);
     }
   }, [shapes, selectedRoute, routes]);
 
+  // Key fix: Render polylines safely with error boundaries
   return (
     <>
-      {routeLines.map((line) => (
-        <Polyline
-          key={line.id}
-          positions={line.positions}
-          pathOptions={{
-            color: line.color,
-            weight: line.weight,
-            opacity: line.opacity,
-            dashArray: line.dashArray,
-            lineCap: 'round',
-            lineJoin: 'round',
-            smoothFactor: 2.0,
-            interactive: false
-          }}
-        />
-      ))}
+      {routeLines.map((line) => {
+        // Additional validation before rendering
+        if (!line || !line.positions || line.positions.length < 2) {
+          return null;
+        }
+
+        return (
+          <Polyline
+            key={`polyline-${line.id}`}
+            positions={line.positions}
+            pathOptions={{
+              color: line.color,
+              weight: line.weight,
+              opacity: line.opacity,
+              dashArray: line.dashArray,
+              lineCap: 'round',
+              lineJoin: 'round',
+              interactive: false, // Key fix: Make polylines non-interactive to prevent canvas errors
+              bubblingMouseEvents: false // Additional fix
+            }}
+          />
+        );
+      })}
     </>
   );
 }
@@ -187,12 +172,16 @@ function RouteMapBounds({
       
       // Add route stops bounds with priority
       routeStops.forEach(stop => {
-        bounds.extend([stop.stop_lat, stop.stop_lon]);
+        if (stop && typeof stop.stop_lat === 'number' && typeof stop.stop_lon === 'number') {
+          bounds.extend([stop.stop_lat, stop.stop_lon]);
+        }
       });
       
       // Add shape bounds for complete route coverage
       shapes.forEach(shape => {
-        bounds.extend([shape.shape_pt_lat, shape.shape_pt_lon]);
+        if (shape && typeof shape.shape_pt_lat === 'number' && typeof shape.shape_pt_lon === 'number') {
+          bounds.extend([shape.shape_pt_lat, shape.shape_pt_lon]);
+        }
       });
       
       if (bounds.isValid()) {
@@ -208,7 +197,9 @@ function RouteMapBounds({
       // Default view showing all stops
       const bounds = new LatLngBounds([]);
       stops.slice(0, 100).forEach(stop => { // Limit for performance
-        bounds.extend([stop.stop_lat, stop.stop_lon]);
+        if (stop && typeof stop.stop_lat === 'number' && typeof stop.stop_lon === 'number') {
+          bounds.extend([stop.stop_lat, stop.stop_lon]);
+        }
       });
       
       if (bounds.isValid()) {
@@ -411,13 +402,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         zoom={11}
         className="h-full w-full"
         zoomControl={true}
-        preferCanvas={true}
+        preferCanvas={false} // Key fix: Use SVG renderer instead of Canvas
+        renderer={undefined} // Let Leaflet choose the best renderer
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          updateWhenIdle={false}
-          updateWhenZooming={false}
+          updateWhenIdle={true} // Key fix: Reduce updates during zoom/pan
+          updateWhenZooming={false} // Key fix: Don't update tiles while zooming
           keepBuffer={2}
         />
         
@@ -428,7 +420,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           routeStops={routeStops}
         />
         
-        {/* Enhanced Route Polylines - Smooth, Road-Integrated Rendering */}
+        {/* Fixed Route Polylines - No more canvas errors */}
         <RoutePolylines
           shapes={routeShapes}
           selectedRoute={selectedRoute}

@@ -23,6 +23,7 @@ body {
   border-radius: 12px;
 }
 
+/* Key fixes for polyline rendering issues */
 .leaflet-popup-content-wrapper {
   border-radius: 16px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
@@ -78,17 +79,40 @@ body {
   background-color: #94a3b8;
 }
 
-/* Enhanced route polyline rendering - smooth and road-integrated */
+/* CRITICAL FIXES for Leaflet polyline rendering issues */
+
+/* Fix 1: Prevent canvas-related errors by ensuring proper SVG rendering */
+.leaflet-overlay-pane svg {
+  pointer-events: auto !important;
+}
+
 .leaflet-overlay-pane svg path {
   stroke-linecap: round !important;
   stroke-linejoin: round !important;
   vector-effect: non-scaling-stroke !important;
-  transition: none !important; /* Remove any transitions that cause glitches */
+  pointer-events: none !important; /* Key fix: Prevent interaction issues */
 }
 
-/* Ensure polylines render smoothly */
+/* Fix 2: Ensure smooth zoom animations without glitches */
 .leaflet-zoom-animated {
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Fix 3: Prevent rendering artifacts during zoom/pan */
+.leaflet-overlay-pane {
+  will-change: transform;
+  transform-origin: 0 0 !important;
+}
+
+/* Fix 4: Ensure polylines don't interfere with map interactions */
+.leaflet-interactive {
+  outline: none !important;
+  pointer-events: auto !important;
+}
+
+/* Fix 5: Prevent any canvas-related issues */
+.leaflet-layer {
+  position: relative !important;
 }
 
 /* Enhanced next arrivals styling */
@@ -183,21 +207,6 @@ body {
 .leaflet-marker-icon:hover {
   transform: scale(1.1);
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
-}
-
-/* Smooth map animations - no glitches */
-.leaflet-map-pane {
-  transform-origin: 0 0 !important;
-}
-
-/* Enhanced route visualization */
-.leaflet-interactive {
-  outline: none !important;
-}
-
-/* Prevent any rendering artifacts */
-.leaflet-overlay-pane {
-  will-change: transform;
 }
 
 /* Responsive text */
