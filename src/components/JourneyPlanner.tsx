@@ -34,15 +34,6 @@ interface JourneyResult {
   transferStops?: Stop[];
 }
 
-// Stop consolidation interface for handling direction-specific stops
-interface ConsolidatedStop {
-  baseLocation: string; // Base name without direction indicators
-  physicalStops: Stop[]; // All stops at this physical location
-  coordinates: { lat: number; lon: number }; // Average coordinates
-  zone: string;
-  accessibility: number;
-}
-
 export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   stops,
   routes,
@@ -61,272 +52,98 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
   const [showFromDropdown, setShowFromDropdown] = useState<boolean>(false);
   const [showToDropdown, setShowToDropdown] = useState<boolean>(false);
 
-  // ENHANCED TIME CALCULATION FUNCTIONS - MOVED TO TOP
-  
-  // Parse GTFS time format (HH:MM:SS) to minutes since midnight
-  const parseGTFSTime = (timeStr: string): number => {
-    if (!timeStr || !timeStr.includes(':')) return 0;
-    
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return 0;
-    
-    const hours = parseInt(parts[0]) || 0;
-    const minutes = parseInt(parts[1]) || 0;
-    const seconds = parseInt(parts[2]) || 0;
-    
-    // Handle times after midnight (25:30:00 = 1:30 AM next day)
-    return (hours * 60) + minutes + Math.round(seconds / 60);
-  };
-
-  // Convert minutes since midnight back to time string
-  const minutesToTimeString = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60) % 24;
-    const mins = minutes % 60;
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`;
-  };
-
-  // Calculate accurate time difference in minutes
-  const calculateTimeDifference = (startTime: string, endTime: string): number => {
-    if (!startTime || !endTime) return 0;
-    
-    const startMinutes = parseGTFSTime(startTime);
-    const endMinutes = parseGTFSTime(endTime);
-    
-    let difference = endMinutes - startMinutes;
-    
-    // Handle next day scenarios (e.g., 23:30 to 01:30)
-    if (difference < 0) {
-      difference += 24 * 60; // Add 24 hours
-    }
-    
-    // Sanity check: journey shouldn't be more than 12 hours
-    if (difference > 12 * 60) {
-      difference = difference - (24 * 60); // Subtract 24 hours
-    }
-    
-    return Math.max(0, difference);
-  };
-
-  // Get current time in GTFS format
-  const getCurrentGTFSTime = (): string => {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
-  };
-
-  // Check if a time is after another time (considering next day scenarios)
-  const isTimeAfter = (timeToCheck: string, referenceTime: string): boolean => {
-    const checkMinutes = parseGTFSTime(timeToCheck);
-    const refMinutes = parseGTFSTime(referenceTime);
-    
-    // If times are close (within 6 hours), use direct comparison
-    if (Math.abs(checkMinutes - refMinutes) <= 6 * 60) {
-      return checkMinutes >= refMinutes;
-    }
-    
-    // Handle day boundary crossing
-    if (checkMinutes < refMinutes) {
-      // Check if this could be next day
-      return (checkMinutes + 24 * 60) >= refMinutes;
-    }
-    
-    return checkMinutes >= refMinutes;
-  };
-
-  // Calculate realistic travel speed between stops
-  const calculateRealisticDuration = (fromStop: Stop, toStop: Stop, scheduledDuration: number): number => {
-    const distance = calculateDistance(fromStop, toStop);
-    
-    // Realistic bus speeds in Madrid:
-    // - City center: 15-20 km/h
-    // - Suburban: 25-35 km/h
-    // - Highway: 40-60 km/h
-    
-    let expectedSpeed = 25; // Default: 25 km/h
-    
-    // Adjust speed based on zone (rough estimation)
-    if (fromStop.zone_id === 'A' || toStop.zone_id === 'A') {
-      expectedSpeed = 18; // City center - slower
-    } else if (fromStop.zone_id === 'C1' || toStop.zone_id === 'C1') {
-      expectedSpeed = 35; // Suburban - faster
-    }
-    
-    const expectedDuration = Math.round((distance / expectedSpeed) * 60); // Convert to minutes
-    
-    // Use the longer of scheduled vs expected (more conservative)
-    const finalDuration = Math.max(scheduledDuration, expectedDuration);
-    
-    // Add buffer for stops (1-2 minutes per intermediate stop estimated)
-    const bufferTime = Math.round(distance * 2); // Rough estimate
-    
-    return Math.min(finalDuration + bufferTime, 180); // Cap at 3 hours
-  };
-
-  // Calculate distance between stops using Haversine formula
-  const calculateDistance = (stop1: Stop, stop2: Stop): number => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
-    const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return Math.round(R * c * 100) / 100;
-  };
-
-  // Consolidate stops by physical location
-  const consolidatedStops = useMemo(() => {
-    const stopGroups = new Map<string, Stop[]>();
-    
-    stops.forEach(stop => {
-      // Create base location key by removing direction indicators and normalizing
-      let baseLocation = stop.stop_name
-        .replace(/\s*-\s*(IDA|VUELTA|INBOUND|OUTBOUND|A|B|1|2)$/i, '') // Remove direction suffixes
-        .replace(/\s*\((IDA|VUELTA|INBOUND|OUTBOUND|A|B|1|2)\)$/i, '') // Remove direction in parentheses
-        .replace(/\s+/g, ' ') // Normalize spaces
-        .trim()
-        .toUpperCase();
-      
-      // Also check for stops with very similar coordinates (within 50m)
-      let foundGroup = false;
-      for (const [existingBase, existingStops] of stopGroups.entries()) {
-        const avgLat = existingStops.reduce((sum, s) => sum + s.stop_lat, 0) / existingStops.length;
-        const avgLon = existingStops.reduce((sum, s) => sum + s.stop_lon, 0) / existingStops.length;
-        
-        const distance = calculateDistance(
-          { stop_lat: avgLat, stop_lon: avgLon } as Stop,
-          stop
-        );
-        
-        // If within 50m and similar name, group together
-        if (distance < 0.05 && (
-          existingBase.includes(baseLocation.substring(0, 10)) || 
-          baseLocation.includes(existingBase.substring(0, 10))
-        )) {
-          existingStops.push(stop);
-          foundGroup = true;
-          break;
-        }
-      }
-      
-      if (!foundGroup) {
-        if (!stopGroups.has(baseLocation)) {
-          stopGroups.set(baseLocation, []);
-        }
-        stopGroups.get(baseLocation)!.push(stop);
-      }
-    });
-
-    // Convert to consolidated stops
-    const consolidated: ConsolidatedStop[] = [];
-    stopGroups.forEach((physicalStops, baseLocation) => {
-      if (physicalStops.length > 0) {
-        const avgLat = physicalStops.reduce((sum, s) => sum + s.stop_lat, 0) / physicalStops.length;
-        const avgLon = physicalStops.reduce((sum, s) => sum + s.stop_lon, 0) / physicalStops.length;
-        const bestAccessibility = Math.max(...physicalStops.map(s => s.wheelchair_boarding));
-        
-        consolidated.push({
-          baseLocation,
-          physicalStops,
-          coordinates: { lat: avgLat, lon: avgLon },
-          zone: physicalStops[0].zone_id,
-          accessibility: bestAccessibility
-        });
-      }
-    });
-
-    console.log(`🏢 Consolidated ${stops.length} stops into ${consolidated.length} physical locations`);
-    return consolidated;
-  }, [stops]);
-
-  // Enhanced stop filtering with consolidated stops
+  // Enhanced stop filtering with better search
   const filteredFromStops = useMemo(() => {
     if (!searchFromTerm || searchFromTerm.length < 2) return [];
     
-    const matchingConsolidated = consolidatedStops.filter(consolidated => 
-      consolidated.baseLocation.includes(searchFromTerm.toUpperCase()) ||
-      consolidated.physicalStops.some(stop => 
-        stop.stop_name.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
-        stop.stop_code.toLowerCase().includes(searchFromTerm.toLowerCase())
-      )
-    );
-
-    // Flatten to individual stops but prioritize by consolidated location
-    const results: Stop[] = [];
-    matchingConsolidated.forEach(consolidated => {
-      // Add the "best" stop from each location (prefer interchange, then accessibility)
-      const bestStop = consolidated.physicalStops.sort((a, b) => {
-        if (a.location_type !== b.location_type) return b.location_type - a.location_type;
-        if (a.wheelchair_boarding !== b.wheelchair_boarding) return b.wheelchair_boarding - a.wheelchair_boarding;
-        return a.stop_name.length - b.stop_name.length; // Prefer shorter names
-      })[0];
-      
-      results.push(bestStop);
-    });
-
-    return results
-      .sort((a, b) => {
-        const aExact = a.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
-        const bExact = b.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
-        if (aExact !== bExact) return aExact - bExact;
-        return a.stop_name.length - b.stop_name.length;
-      })
-      .slice(0, 15);
-  }, [consolidatedStops, searchFromTerm]);
+    return stops.filter(stop => 
+      stop.stop_name.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
+      stop.stop_code.toLowerCase().includes(searchFromTerm.toLowerCase()) ||
+      stop.stop_id.toLowerCase().includes(searchFromTerm.toLowerCase())
+    )
+    .sort((a, b) => {
+      // Prioritize exact matches and shorter names
+      const aExact = a.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
+      const bExact = b.stop_name.toLowerCase().startsWith(searchFromTerm.toLowerCase()) ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      return a.stop_name.length - b.stop_name.length;
+    })
+    .slice(0, 15);
+  }, [stops, searchFromTerm]);
 
   const filteredToStops = useMemo(() => {
     if (!searchToTerm || searchToTerm.length < 2) return [];
     
-    const matchingConsolidated = consolidatedStops.filter(consolidated => 
-      !consolidated.physicalStops.some(s => s.stop_id === fromStopId) && // Exclude selected from location
-      (consolidated.baseLocation.includes(searchToTerm.toUpperCase()) ||
-       consolidated.physicalStops.some(stop => 
-         stop.stop_name.toLowerCase().includes(searchToTerm.toLowerCase()) ||
-         stop.stop_code.toLowerCase().includes(searchToTerm.toLowerCase())
-       ))
-    );
+    return stops.filter(stop => 
+      stop.stop_id !== fromStopId && // Exclude selected from stop
+      (stop.stop_name.toLowerCase().includes(searchToTerm.toLowerCase()) ||
+       stop.stop_code.toLowerCase().includes(searchToTerm.toLowerCase()) ||
+       stop.stop_id.toLowerCase().includes(searchToTerm.toLowerCase()))
+    )
+    .sort((a, b) => {
+      const aExact = a.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
+      const bExact = b.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      return a.stop_name.length - b.stop_name.length;
+    })
+    .slice(0, 15);
+  }, [stops, searchToTerm, fromStopId]);
 
-    const results: Stop[] = [];
-    matchingConsolidated.forEach(consolidated => {
-      const bestStop = consolidated.physicalStops.sort((a, b) => {
-        if (a.location_type !== b.location_type) return b.location_type - a.location_type;
-        if (a.wheelchair_boarding !== b.wheelchair_boarding) return b.wheelchair_boarding - a.wheelchair_boarding;
-        return a.stop_name.length - b.stop_name.length;
-      })[0];
-      
-      results.push(bestStop);
-    });
-
-    return results
-      .sort((a, b) => {
-        const aExact = a.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
-        const bExact = b.stop_name.toLowerCase().startsWith(searchToTerm.toLowerCase()) ? 0 : 1;
-        if (aExact !== bExact) return aExact - bExact;
-        return a.stop_name.length - b.stop_name.length;
-      })
-      .slice(0, 15);
-  }, [consolidatedStops, searchToTerm, fromStopId]);
-
-  // Get current time as default
+  // Get current time as default (Madrid timezone)
   const getCurrentTime = () => {
     const now = new Date();
-    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    // Convert to Madrid time (UTC+1 or UTC+2 depending on DST)
+    const madridTime = new Date(now.toLocaleString("en-US", {timeZone: "Europe/Madrid"}));
+    return `${madridTime.getHours().toString().padStart(2, '0')}:${madridTime.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  // Get all physical stops for a given stop (including direction variants)
-  const getPhysicalStopsForLocation = (stopId: string): Stop[] => {
-    const stop = stops.find(s => s.stop_id === stopId);
-    if (!stop) return [stop].filter(Boolean) as Stop[];
+  // FIXED: Standard GTFS time parsing and comparison
+  const parseGTFSTime = (timeStr: string): { hours: number; minutes: number; totalMinutes: number } => {
+    if (!timeStr || !timeStr.includes(':')) {
+      return { hours: 0, minutes: 0, totalMinutes: 0 };
+    }
     
-    const consolidated = consolidatedStops.find(c => 
-      c.physicalStops.some(s => s.stop_id === stopId)
-    );
-    
-    return consolidated ? consolidated.physicalStops : [stop];
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return {
+      hours,
+      minutes,
+      totalMinutes: hours * 60 + minutes
+    };
   };
 
-  // CONSOLIDATED JOURNEY PLANNING LOGIC
+  // FIXED: Proper time comparison respecting user's departure time
+  const isTimeAfterDeparture = (gtfsTime: string, userDepartureTime: string): boolean => {
+    const gtfsTimeData = parseGTFSTime(gtfsTime);
+    const userTimeData = parseGTFSTime(userDepartureTime);
+    
+    // Handle next-day times (GTFS allows 24:00+ for next day)
+    let gtfsTotalMinutes = gtfsTimeData.totalMinutes;
+    let userTotalMinutes = userTimeData.totalMinutes;
+    
+    // If GTFS time is next day (25:30 = 1:30 AM next day)
+    if (gtfsTimeData.hours >= 24) {
+      gtfsTotalMinutes = gtfsTimeData.totalMinutes; // Keep as is for comparison
+    }
+    
+    return gtfsTotalMinutes >= userTotalMinutes;
+  };
+
+  // FIXED: Use exact GTFS duration calculation
+  const calculateGTFSDuration = (startTime: string, endTime: string): number => {
+    const startData = parseGTFSTime(startTime);
+    const endData = parseGTFSTime(endTime);
+    
+    let duration = endData.totalMinutes - startData.totalMinutes;
+    
+    // Handle next-day scenarios
+    if (duration < 0) {
+      duration += 24 * 60; // Add 24 hours
+    }
+    
+    return duration;
+  };
+
+  // Enhanced journey planning with proper departure time filtering
   const planJourney = async () => {
     if (!fromStopId || !toStopId || fromStopId === toStopId) {
       return;
@@ -343,99 +160,65 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
         return;
       }
 
-      console.log('🚌 CONSOLIDATED Journey Planning - Enhanced Time Calculations');
-      console.log(`📍 From: ${fromStop.stop_name} (${fromStop.stop_id})`);
-      console.log(`📍 To: ${toStop.stop_name} (${toStop.stop_id})`);
+      console.log('🚌 Planning journey from:', fromStop.stop_name, 'to:', toStop.stop_name);
+      console.log('🕐 Departure time filter:', departureTime || 'Current time');
 
-      // Get all physical variants of origin and destination
-      const fromPhysicalStops = getPhysicalStopsForLocation(fromStopId);
-      const toPhysicalStops = getPhysicalStopsForLocation(toStopId);
-      
-      console.log(`🏢 From location has ${fromPhysicalStops.length} physical stops`);
-      console.log(`🏢 To location has ${toPhysicalStops.length} physical stops`);
+      // FIXED: Use user's departure time or current Madrid time
+      const searchTime = departureTime || getCurrentTime();
+      console.log('🔍 Searching for departures after:', searchTime);
 
-      // STEP 1: Try to find DIRECT routes first
-      const directJourneys: JourneyResult[] = [];
+      // Find direct routes first (prioritized)
+      const directRoutes = await findDirectRoutesWithDepartureTime(fromStop, toStop, searchTime);
+      console.log('📍 Direct routes found:', directRoutes.length);
       
-      for (const fromPhysical of fromPhysicalStops) {
-        for (const toPhysical of toPhysicalStops) {
-          const directRoutes = await findDirectRoutesEnhanced(fromPhysical, toPhysical);
-          directJourneys.push(...directRoutes);
-        }
+      // Only find transfer routes if no direct routes available
+      let transferRoutes: JourneyResult[] = [];
+      if (directRoutes.length === 0) {
+        console.log('🔄 No direct routes found, searching for transfer options...');
+        transferRoutes = await findEnhancedTransferRoutesWithDepartureTime(fromStop, toStop, searchTime);
+        console.log('🔄 Transfer routes found:', transferRoutes.length);
       }
       
-      console.log(`🎯 Found ${directJourneys.length} direct route options`);
+      // Combine and rank results (direct routes always first)
+      const allJourneys = [...directRoutes, ...transferRoutes]
+        .filter(journey => journey.routes.length > 0)
+        .sort((a, b) => {
+          // Direct routes always come first
+          if (a.transfers === 0 && b.transfers > 0) return -1;
+          if (a.transfers > 0 && b.transfers === 0) return 1;
+          
+          // Among same type, sort by departure time (earliest first)
+          const aDeparture = parseGTFSTime(a.routes[0].departureTime).totalMinutes;
+          const bDeparture = parseGTFSTime(b.routes[0].departureTime).totalMinutes;
+          if (aDeparture !== bDeparture) return aDeparture - bDeparture;
+          
+          // Then by total duration
+          return a.totalDuration - b.totalDuration;
+        })
+        .slice(0, 8); // Show top 8 options
 
-      // CONSOLIDATION LOGIC: If direct routes exist, ONLY show direct routes
-      if (directJourneys.length > 0) {
-        console.log('✅ DIRECT ROUTES AVAILABLE - Showing only direct options');
-        
-        const bestDirectJourneys = directJourneys
-          .filter(journey => journey.routes.length > 0)
-          .sort((a, b) => {
-            // Sort by: confidence, then duration
-            if (a.confidence !== b.confidence) return b.confidence - a.confidence;
-            return a.totalDuration - b.totalDuration;
-          })
-          .slice(0, 5); // Show top 5 direct options
-
-        setJourneyResults(bestDirectJourneys);
-        console.log(`📋 Displaying ${bestDirectJourneys.length} direct journey options`);
-      } else {
-        // STEP 2: Only if NO direct routes, find transfer routes
-        console.log('🔄 NO DIRECT ROUTES - Searching for transfer options');
-        
-        const transferJourneys = await findTransferRoutesEnhanced(fromPhysicalStops, toPhysicalStops);
-        console.log(`🔄 Found ${transferJourneys.length} transfer route options`);
-
-        if (transferJourneys.length > 0) {
-          // Show ONLY the fastest transfer option
-          const fastestTransfer = transferJourneys
-            .filter(journey => journey.routes.length > 0)
-            .sort((a, b) => {
-              // Sort by: transfers, then duration, then confidence
-              if (a.transfers !== b.transfers) return a.transfers - b.transfers;
-              if (a.totalDuration !== b.totalDuration) return a.totalDuration - b.totalDuration;
-              return b.confidence - a.confidence;
-            })[0]; // Take only the fastest
-
-          if (fastestTransfer) {
-            setJourneyResults([fastestTransfer]);
-            console.log('📋 Displaying FASTEST transfer option only');
-          } else {
-            setJourneyResults([]);
-            console.log('❌ No valid transfer routes found');
-          }
-        } else {
-          setJourneyResults([]);
-          console.log('❌ No routes found (direct or transfer)');
-        }
-      }
-
+      console.log('✅ Total journeys found:', allJourneys.length);
+      setJourneyResults(allJourneys);
     } catch (error) {
-      console.error('❌ Error in consolidated journey planning:', error);
-      setJourneyResults([]);
+      console.error('❌ Error planning journey:', error);
     } finally {
       setIsPlanning(false);
     }
   };
 
-  // Enhanced direct route finding with accurate time calculations
-  const findDirectRoutesEnhanced = async (fromStop: Stop, toStop: Stop): Promise<JourneyResult[]> => {
+  // FIXED: Direct route finding with proper departure time filtering
+  const findDirectRoutesWithDepartureTime = async (fromStop: Stop, toStop: Stop, searchTime: string): Promise<JourneyResult[]> => {
     const results: JourneyResult[] = [];
-    const searchTime = departureTime ? `${departureTime}:00` : getCurrentGTFSTime();
 
-    console.log(`🔍 Searching direct routes: ${fromStop.stop_name} → ${toStop.stop_name}`);
-    console.log(`⏰ Search time: ${searchTime}`);
+    console.log(`🔍 Searching direct routes from ${fromStop.stop_name} to ${toStop.stop_name} after ${searchTime}`);
 
-    // Get stop times for both stops
+    // Get all stop times for both stops
     const fromStopTimes = stopTimes.filter(st => st.stop_id === fromStop.stop_id);
     const toStopTimes = stopTimes.filter(st => st.stop_id === toStop.stop_id);
 
-    console.log(`📊 From stop has ${fromStopTimes.length} scheduled times`);
-    console.log(`📊 To stop has ${toStopTimes.length} scheduled times`);
+    console.log(`📊 From stop times: ${fromStopTimes.length}, To stop times: ${toStopTimes.length}`);
 
-    // Group by trip to find connections
+    // Group by trip to find common trips
     const tripConnections = new Map<string, {
       fromStopTime: StopTime;
       toStopTime: StopTime;
@@ -444,15 +227,16 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     }>();
 
     fromStopTimes.forEach(fromST => {
-      // Only consider departures at or after search time
-      if (!fromST.departure_time || !isTimeAfter(fromST.departure_time, searchTime)) {
-        return;
+      // FIXED: Apply departure time filter immediately
+      if (!fromST.departure_time || !isTimeAfterDeparture(fromST.departure_time, searchTime)) {
+        return; // Skip if before departure time
       }
 
       const toST = toStopTimes.find(toStopTime => 
         toStopTime.trip_id === fromST.trip_id &&
-        toStopTime.stop_sequence > fromST.stop_sequence && // Correct sequence
-        toStopTime.departure_time // Has valid time
+        toStopTime.stop_sequence > fromST.stop_sequence && // Ensure correct direction
+        toStopTime.departure_time &&
+        parseGTFSTime(toStopTime.departure_time).totalMinutes > parseGTFSTime(fromST.departure_time).totalMinutes
       );
 
       if (toST) {
@@ -460,32 +244,32 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
         const route = trip ? routes.find(r => r.route_id === trip.route_id) : null;
 
         if (trip && route) {
-          const key = `${route.route_id}-${trip.direction_id}-${trip.trip_id}`;
-          tripConnections.set(key, {
-            fromStopTime: fromST,
-            toStopTime: toST,
-            trip,
-            route
-          });
+          const key = `${route.route_id}-${trip.direction_id}-${fromST.departure_time}`;
+          
+          // Keep all valid departures (not just earliest)
+          if (!tripConnections.has(key)) {
+            tripConnections.set(key, {
+              fromStopTime: fromST,
+              toStopTime: toST,
+              trip,
+              route
+            });
+          }
         }
       }
     });
 
-    console.log(`  📊 Found ${tripConnections.size} valid trip connections`);
+    console.log(`🎯 Found ${tripConnections.size} direct connections after ${searchTime}`);
 
-    // Convert to journey results with enhanced time calculations
+    // Convert to journey results using exact GTFS times
     Array.from(tripConnections.values()).forEach((connection, index) => {
-      const scheduledDuration = calculateTimeDifference(
+      // FIXED: Use exact GTFS duration calculation
+      const duration = calculateGTFSDuration(
         connection.fromStopTime.departure_time,
         connection.toStopTime.arrival_time || connection.toStopTime.departure_time
       );
 
-      // Calculate realistic duration based on distance and expected speed
-      const realisticDuration = calculateRealisticDuration(fromStop, toStop, scheduledDuration);
-      
-      console.log(`⏱️  Route ${connection.route.route_short_name}: Scheduled=${scheduledDuration}min, Realistic=${realisticDuration}min`);
-
-      if (realisticDuration > 0 && realisticDuration < 300) { // Reasonable duration
+      if (duration > 0 && duration < 300) { // Reasonable duration (less than 5 hours)
         const intermediateStops = getIntermediateStops(
           connection.trip.trip_id,
           connection.fromStopTime.stop_sequence,
@@ -494,17 +278,8 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
 
         const directionLabel = connection.trip.direction_id === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
 
-        // Calculate confidence based on time accuracy
-        let confidence = 100;
-        if (Math.abs(scheduledDuration - realisticDuration) > 15) {
-          confidence = 85; // Lower confidence if times don't match well
-        }
-        if (realisticDuration > 90) {
-          confidence = Math.max(confidence - 10, 70); // Lower confidence for very long journeys
-        }
-
         results.push({
-          id: `direct-enhanced-${connection.route.route_id}-${connection.trip.direction_id}-${index}`,
+          id: `direct-${connection.route.route_id}-${connection.trip.direction_id}-${connection.fromStopTime.departure_time}-${index}`,
           fromStop,
           toStop,
           routes: [{
@@ -514,245 +289,180 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             toStop,
             departureTime: connection.fromStopTime.departure_time,
             arrivalTime: connection.toStopTime.arrival_time || connection.toStopTime.departure_time,
-            duration: realisticDuration, // Use realistic duration
+            duration,
             stops: [fromStop, ...intermediateStops, toStop],
             direction: connection.trip.direction_id,
             directionLabel
           }],
-          totalDuration: realisticDuration,
+          totalDuration: duration,
           totalDistance: calculateDistance(fromStop, toStop),
           transfers: 0,
           walkingTime: 0,
-          confidence
+          confidence: 100 // Direct routes have highest confidence
         });
       }
     });
 
-    console.log(`✅ Generated ${results.length} direct route results`);
-    return results;
+    console.log(`✅ Generated ${results.length} direct journey options`);
+    return results.sort((a, b) => {
+      // Sort by departure time (earliest first)
+      const aDeparture = parseGTFSTime(a.routes[0].departureTime).totalMinutes;
+      const bDeparture = parseGTFSTime(b.routes[0].departureTime).totalMinutes;
+      return aDeparture - bDeparture;
+    });
   };
 
-  // Enhanced transfer route finding with accurate time calculations
-  const findTransferRoutesEnhanced = async (fromPhysicalStops: Stop[], toPhysicalStops: Stop[]): Promise<JourneyResult[]> => {
+  // FIXED: Transfer route finding with departure time filtering
+  const findEnhancedTransferRoutesWithDepartureTime = async (fromStop: Stop, toStop: Stop, searchTime: string): Promise<JourneyResult[]> => {
     const results: JourneyResult[] = [];
-    
-    console.log('🔄 Enhanced transfer search with accurate time calculations');
 
-    // Find potential transfer hubs
-    const transferHubs = await findEnhancedTransferHubs(fromPhysicalStops, toPhysicalStops);
+    console.log('🔄 Starting enhanced transfer route search with departure time filtering...');
+
+    // Get potential transfer hubs
+    const transferHubs = await findAllPotentialTransferHubs(fromStop, toStop);
     console.log(`🏢 Found ${transferHubs.length} potential transfer hubs`);
 
-    for (const hub of transferHubs.slice(0, 15)) { // Limit to top 15 hubs for performance
+    // Process each hub with departure time filtering
+    for (const hub of transferHubs.slice(0, 15)) { // Limit to top 15 hubs
       try {
-        // Get all physical stops at this hub location
-        const hubPhysicalStops = getPhysicalStopsForLocation(hub.stop_id);
+        console.log(`🔍 Checking hub: ${hub.stop_name} (${hub.stop_id})`);
         
-        console.log(`🔍 Checking hub: ${hub.stop_name} (${hubPhysicalStops.length} physical stops)`);
+        // Find first leg (origin to hub) with departure time filter
+        const firstLegOptions = await findDirectRoutesWithDepartureTime(fromStop, hub, searchTime);
+        
+        if (firstLegOptions.length === 0) continue;
 
-        // Try all combinations of origin → hub → destination
-        for (const fromStop of fromPhysicalStops) {
-          for (const hubStop of hubPhysicalStops) {
-            for (const toStop of toPhysicalStops) {
-              // Find first leg: origin to hub
-              const firstLeg = await findDirectRoutesEnhanced(fromStop, hubStop);
+        // For each first leg, find second leg options
+        for (const firstLeg of firstLegOptions.slice(0, 3)) { // Top 3 first leg options
+          const firstLegArrival = firstLeg.routes[0].arrivalTime;
+          const transferTime = calculateTransferTime(hub);
+          
+          // Calculate minimum departure time for second leg (arrival + transfer time)
+          const firstLegArrivalData = parseGTFSTime(firstLegArrival);
+          const secondLegMinDeparture = `${Math.floor((firstLegArrivalData.totalMinutes + transferTime) / 60).toString().padStart(2, '0')}:${((firstLegArrivalData.totalMinutes + transferTime) % 60).toString().padStart(2, '0')}`;
+          
+          const secondLegOptions = await findDirectRoutesWithDepartureTime(hub, toStop, secondLegMinDeparture);
+          
+          // Create transfer journey for the best second leg option
+          if (secondLegOptions.length > 0) {
+            const secondLeg = secondLegOptions[0]; // Take earliest departure
+            const waitTime = calculateGTFSDuration(firstLegArrival, secondLeg.routes[0].departureTime);
+            
+            if (waitTime >= transferTime && waitTime <= 60) { // Reasonable transfer window
+              const totalDuration = firstLeg.totalDuration + secondLeg.totalDuration + waitTime;
               
-              // Find second leg: hub to destination (try all hub physical stops)
-              for (const hubExitStop of hubPhysicalStops) {
-                const secondLeg = await findDirectRoutesEnhanced(hubExitStop, toStop);
-                
-                // Create transfer combinations
-                firstLeg.forEach(leg1 => {
-                  secondLeg.forEach(leg2 => {
-                    const transfer = createEnhancedTransfer(leg1, leg2, hubStop, hubExitStop);
-                    if (transfer) {
-                      results.push(transfer);
-                    }
-                  });
-                });
-              }
+              results.push({
+                id: `transfer-${firstLeg.routes[0].route.route_id}-${secondLeg.routes[0].route.route_id}-${hub.stop_id}-${firstLeg.routes[0].departureTime}`,
+                fromStop,
+                toStop,
+                routes: [firstLeg.routes[0], secondLeg.routes[0]],
+                totalDuration,
+                totalDistance: firstLeg.totalDistance + secondLeg.totalDistance,
+                transfers: 1,
+                walkingTime: transferTime,
+                confidence: Math.max(60, 90 - waitTime), // Good confidence for reasonable transfers
+                transferStops: [hub]
+              });
             }
           }
         }
+        
       } catch (error) {
-        console.error(`❌ Error processing hub ${hub.stop_name}:`, error);
+        console.error(`❌ Error processing transfer hub ${hub.stop_name}:`, error);
       }
     }
 
-    return results;
+    console.log(`✅ Enhanced transfer search complete: ${results.length} transfer options`);
+    
+    // Return only the fastest transfer option
+    return results
+      .sort((a, b) => a.totalDuration - b.totalDuration)
+      .slice(0, 1); // Only return the fastest transfer option
   };
 
-  // Enhanced transfer hub finding
-  const findEnhancedTransferHubs = async (fromPhysicalStops: Stop[], toPhysicalStops: Stop[]): Promise<Stop[]> => {
+  // Get all potential transfer hubs using multiple strategies
+  const findAllPotentialTransferHubs = async (fromStop: Stop, toStop: Stop): Promise<Stop[]> => {
     const hubs = new Set<Stop>();
 
-    // Strategy 1: Official interchanges
-    const interchanges = stops.filter(stop => stop.location_type === 1);
-    interchanges.forEach(hub => hubs.add(hub));
+    // Strategy 1: Official interchange stations
+    const officialInterchanges = stops.filter(stop => stop.location_type === 1);
+    officialInterchanges.forEach(hub => hubs.add(hub));
 
     // Strategy 2: High-traffic stops (served by many routes)
     const highTrafficStops = stops.filter(stop => {
       const routeCount = getRoutesServingStop(stop.stop_id).length;
-      return routeCount >= 3 && 
-             !fromPhysicalStops.some(s => s.stop_id === stop.stop_id) &&
-             !toPhysicalStops.some(s => s.stop_id === stop.stop_id);
+      return routeCount >= 3 && stop.stop_id !== fromStop.stop_id && stop.stop_id !== toStop.stop_id;
     });
     highTrafficStops.forEach(hub => hubs.add(hub));
 
-    // Strategy 3: Stops that connect origin and destination networks
-    const fromRoutes = new Set<string>();
-    const toRoutes = new Set<string>();
-    
-    fromPhysicalStops.forEach(stop => {
-      getRoutesServingStop(stop.stop_id).forEach(route => fromRoutes.add(route.route_id));
-    });
-    
-    toPhysicalStops.forEach(stop => {
-      getRoutesServingStop(stop.stop_id).forEach(route => toRoutes.add(route.route_id));
-    });
+    // Strategy 3: Stops that serve routes connecting to both origin and destination
+    const connectingStops = await findConnectingStops(fromStop, toStop);
+    connectingStops.forEach(hub => hubs.add(hub));
 
-    // Find stops served by routes that connect to both networks
-    stops.forEach(stop => {
-      const stopRoutes = getRoutesServingStop(stop.stop_id);
-      const connectsToOrigin = stopRoutes.some(route => fromRoutes.has(route.route_id));
-      const connectsToDestination = stopRoutes.some(route => toRoutes.has(route.route_id));
-      
-      if (connectsToOrigin && connectsToDestination) {
-        hubs.add(stop);
-      }
-    });
-
-    // Convert to array and sort by potential
+    // Convert to array and sort by potential (route count + interchange status)
     return Array.from(hubs)
       .map(hub => ({
         stop: hub,
-        score: calculateEnhancedHubScore(hub, fromPhysicalStops, toPhysicalStops)
+        score: calculateHubScore(hub, fromStop, toStop)
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 30) // Top 30 hubs
+      .slice(0, 20) // Top 20 potential hubs
       .map(item => item.stop);
   };
 
-  // Enhanced hub scoring
-  const calculateEnhancedHubScore = (hub: Stop, fromStops: Stop[], toStops: Stop[]): number => {
+  // Find stops that have routes serving both origin and destination areas
+  const findConnectingStops = async (fromStop: Stop, toStop: Stop): Promise<Stop[]> => {
+    const fromRoutes = getRoutesServingStop(fromStop.stop_id);
+    const toRoutes = getRoutesServingStop(toStop.stop_id);
+    
+    const connectingStops: Stop[] = [];
+
+    // Find stops served by routes that also serve the origin
+    fromRoutes.forEach(route => {
+      const routeStops = getStopsServedByRoute(route.route_id);
+      routeStops.forEach(stop => {
+        if (stop.stop_id !== fromStop.stop_id && stop.stop_id !== toStop.stop_id) {
+          // Check if this stop is also served by routes that serve the destination
+          const stopRoutes = getRoutesServingStop(stop.stop_id);
+          const hasConnectionToDestination = stopRoutes.some(stopRoute => 
+            toRoutes.some(toRoute => toRoute.route_id === stopRoute.route_id) ||
+            getStopsServedByRoute(stopRoute.route_id).some(s => s.stop_id === toStop.stop_id)
+          );
+          
+          if (hasConnectionToDestination) {
+            connectingStops.push(stop);
+          }
+        }
+      });
+    });
+
+    return connectingStops;
+  };
+
+  // Calculate hub score for ranking
+  const calculateHubScore = (hub: Stop, fromStop: Stop, toStop: Stop): number => {
     let score = 0;
     
-    // Route count bonus
+    // Route count (more routes = better hub)
     const routeCount = getRoutesServingStop(hub.stop_id).length;
-    score += routeCount * 15;
+    score += routeCount * 10;
     
     // Official interchange bonus
-    if (hub.location_type === 1) score += 100;
+    if (hub.location_type === 1) score += 50;
     
-    // Physical stop consolidation bonus
-    const hubPhysicalStops = getPhysicalStopsForLocation(hub.stop_id);
-    score += hubPhysicalStops.length * 20; // More physical stops = better transfer hub
+    // Geographic position (prefer hubs between origin and destination)
+    const totalDistance = calculateDistance(fromStop, toStop);
+    const hubToOrigin = calculateDistance(fromStop, hub);
+    const hubToDestination = calculateDistance(hub, toStop);
+    const detourFactor = (hubToOrigin + hubToDestination) / totalDistance;
     
-    // Geographic position bonus
-    const avgFromLat = fromStops.reduce((sum, s) => sum + s.stop_lat, 0) / fromStops.length;
-    const avgFromLon = fromStops.reduce((sum, s) => sum + s.stop_lon, 0) / fromStops.length;
-    const avgToLat = toStops.reduce((sum, s) => sum + s.stop_lat, 0) / toStops.length;
-    const avgToLon = toStops.reduce((sum, s) => sum + s.stop_lon, 0) / toStops.length;
-    
-    const fromDistance = calculateDistance({ stop_lat: avgFromLat, stop_lon: avgFromLon } as Stop, hub);
-    const toDistance = calculateDistance({ stop_lat: avgToLat, stop_lon: avgToLon } as Stop, hub);
-    const directDistance = calculateDistance(
-      { stop_lat: avgFromLat, stop_lon: avgFromLon } as Stop,
-      { stop_lat: avgToLat, stop_lon: avgToLon } as Stop
-    );
-    
-    const detourFactor = (fromDistance + toDistance) / Math.max(directDistance, 0.1);
-    if (detourFactor < 2.0) score += 50; // Reasonable detour
-    if (detourFactor < 1.5) score += 30; // Good detour
+    if (detourFactor < 1.5) score += 30; // Reasonable detour
+    if (detourFactor < 1.2) score += 20; // Good detour
     
     // Accessibility bonus
-    if (hub.wheelchair_boarding === 1) score += 25;
+    if (hub.wheelchair_boarding === 1) score += 10;
     
     return score;
-  };
-
-  // Enhanced transfer creation with accurate time calculations
-  const createEnhancedTransfer = (
-    leg1: JourneyResult, 
-    leg2: JourneyResult, 
-    hubEntryStop: Stop, 
-    hubExitStop: Stop
-  ): JourneyResult | null => {
-    try {
-      const leg1Route = leg1.routes[0];
-      const leg2Route = leg2.routes[0];
-      
-      // Calculate transfer time (consider if it's the same physical stop or requires walking)
-      const transferTime = hubEntryStop.stop_id === hubExitStop.stop_id ? 
-        calculateTransferTime(hubEntryStop) : // Same stop transfer
-        calculateWalkingTime(hubEntryStop, hubExitStop); // Walking transfer
-      
-      const waitTime = calculateTimeDifference(
-        leg1Route.arrivalTime,
-        leg2Route.departureTime
-      );
-      
-      console.log(`🔄 Transfer check: ${leg1Route.route.route_short_name} → ${leg2Route.route.route_short_name}`);
-      console.log(`   Wait time: ${waitTime}min, Transfer time needed: ${transferTime}min`);
-      
-      // Validate transfer feasibility with more realistic windows
-      if (waitTime >= transferTime && waitTime <= 45) { // 5-45 minute transfer window
-        const totalDuration = leg1.totalDuration + leg2.totalDuration + waitTime;
-        
-        if (totalDuration < 240) { // Less than 4 hours total (more realistic)
-          // Calculate confidence based on transfer quality
-          let confidence = 80; // Base confidence for transfers
-          
-          // Bonus for short wait times
-          if (waitTime <= 15) confidence += 10;
-          if (waitTime <= 10) confidence += 5;
-          
-          // Penalty for long wait times
-          if (waitTime > 30) confidence -= 10;
-          if (waitTime > 40) confidence -= 10;
-          
-          // Penalty for walking transfers
-          if (hubEntryStop.stop_id !== hubExitStop.stop_id) confidence -= 15;
-          
-          // Bonus for official interchanges
-          if (hubEntryStop.location_type === 1) confidence += 10;
-          
-          confidence = Math.max(40, Math.min(95, confidence));
-
-          return {
-            id: `enhanced-transfer-${leg1Route.route.route_id}-${leg2Route.route.route_id}-${hubEntryStop.stop_id}-${hubExitStop.stop_id}`,
-            fromStop: leg1.fromStop,
-            toStop: leg2.toStop,
-            routes: [
-              {
-                ...leg1Route,
-                toStop: hubEntryStop
-              },
-              {
-                ...leg2Route,
-                fromStop: hubExitStop
-              }
-            ],
-            totalDuration,
-            totalDistance: leg1.totalDistance + leg2.totalDistance + 
-              (hubEntryStop.stop_id !== hubExitStop.stop_id ? calculateDistance(hubEntryStop, hubExitStop) : 0),
-            transfers: 1,
-            walkingTime: transferTime,
-            confidence,
-            transferStops: hubEntryStop.stop_id === hubExitStop.stop_id ? [hubEntryStop] : [hubEntryStop, hubExitStop]
-          };
-        }
-      }
-    } catch (error) {
-      console.error('Error creating enhanced transfer:', error);
-    }
-    
-    return null;
-  };
-
-  // Calculate walking time between stops
-  const calculateWalkingTime = (stop1: Stop, stop2: Stop): number => {
-    const distance = calculateDistance(stop1, stop2);
-    return Math.max(5, Math.ceil(distance * 12)); // Minimum 5 minutes, ~12 min per km
   };
 
   // Get routes serving a specific stop
@@ -768,6 +478,16 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     )];
 
     return routes.filter(route => routeIds.includes(route.route_id));
+  };
+
+  // Get stops served by a specific route
+  const getStopsServedByRoute = (routeId: string): Stop[] => {
+    const routeTrips = trips.filter(trip => trip.route_id === routeId);
+    const routeTripIds = routeTrips.map(trip => trip.trip_id);
+    const routeStopTimes = stopTimes.filter(st => routeTripIds.includes(st.trip_id));
+    const uniqueStopIds = [...new Set(routeStopTimes.map(st => st.stop_id))];
+    
+    return stops.filter(stop => uniqueStopIds.includes(stop.stop_id));
   };
 
   // Calculate appropriate transfer time based on stop type
@@ -791,41 +511,47 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       .filter(Boolean) as Stop[];
   };
 
-  // Enhanced time formatting for display
+  // Calculate distance between stops using Haversine formula
+  const calculateDistance = (stop1: Stop, stop2: Stop): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (stop2.stop_lat - stop1.stop_lat) * Math.PI / 180;
+    const dLon = (stop2.stop_lon - stop1.stop_lon) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(stop1.stop_lat * Math.PI / 180) * Math.cos(stop2.stop_lat * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return Math.round(R * c * 100) / 100;
+  };
+
+  // FIXED: Format time for display (Madrid timezone aware)
   const formatTime = (timeStr: string): string => {
     if (!timeStr || !timeStr.includes(':')) return 'N/A';
     
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return 'N/A';
+    const timeData = parseGTFSTime(timeStr);
+    let displayHour = timeData.hours;
+    const displayMinute = timeData.minutes.toString().padStart(2, '0');
     
-    let hours = parseInt(parts[0]);
-    const minutes = parts[1];
-    
-    // Handle 24+ hour format (next day)
-    if (hours >= 24) {
-      hours = hours - 24;
+    // Handle next-day times (24+ hours)
+    if (displayHour >= 24) {
+      displayHour = displayHour - 24;
     }
     
-    if (hours === 0) return `12:${minutes} AM`;
-    if (hours < 12) return `${hours}:${minutes} AM`;
-    if (hours === 12) return `12:${minutes} PM`;
-    return `${hours - 12}:${minutes} PM`;
+    // Convert to 12-hour format
+    if (displayHour === 0) return `12:${displayMinute} AM`;
+    if (displayHour < 12) return `${displayHour}:${displayMinute} AM`;
+    if (displayHour === 12) return `12:${displayMinute} PM`;
+    return `${displayHour - 12}:${displayMinute} PM`;
   };
 
-  // Enhanced duration formatting
+  // Format duration
   const formatDuration = (minutes: number): string => {
-    if (minutes < 60) {
-      return `${minutes}m`;
-    }
-    
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     
-    if (mins === 0) {
-      return `${hours}h`;
+    if (hours > 0) {
+      return `${hours}h ${mins}m`;
     }
-    
-    return `${hours}h ${mins}m`;
+    return `${mins}m`;
   };
 
   const handleJourneySelect = (journey: JourneyResult) => {
@@ -879,8 +605,8 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             <Navigation className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">⏱️ Accurate Journey Planner</h3>
-            <p className="text-sm text-gray-600">Realistic travel times • Enhanced calculations • Direct priority</p>
+            <h3 className="text-lg font-semibold text-gray-900">Enhanced Journey Planner</h3>
+            <p className="text-sm text-gray-600">Standard GTFS times • Madrid timezone • Departure time filtering</p>
           </div>
         </div>
         {(fromStopId || toStopId || journeyResults.length > 0) && (
@@ -919,28 +645,22 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             
             {showFromDropdown && searchFromTerm && filteredFromStops.length > 0 && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredFromStops.map(stop => {
-                  const physicalStops = getPhysicalStopsForLocation(stop.stop_id);
-                  return (
-                    <button
-                      key={stop.stop_id}
-                      onClick={() => handleFromStopSelect(stop)}
-                      className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                        fromStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
-                      }`}
-                    >
-                      <div className="font-medium text-sm">{stop.stop_name}</div>
-                      <div className="text-xs text-gray-600">
-                        Code: {stop.stop_code} • Zone: {stop.zone_id}
-                        {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                        <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
-                        {physicalStops.length > 1 && (
-                          <span className="ml-2 text-purple-600">• {physicalStops.length} platforms</span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                {filteredFromStops.map(stop => (
+                  <button
+                    key={stop.stop_id}
+                    onClick={() => handleFromStopSelect(stop)}
+                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                      fromStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{stop.stop_name}</div>
+                    <div className="text-xs text-gray-600">
+                      Code: {stop.stop_code} • Zone: {stop.zone_id}
+                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -981,38 +701,32 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             
             {showToDropdown && searchToTerm && filteredToStops.length > 0 && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
-                {filteredToStops.map(stop => {
-                  const physicalStops = getPhysicalStopsForLocation(stop.stop_id);
-                  return (
-                    <button
-                      key={stop.stop_id}
-                      onClick={() => handleToStopSelect(stop)}
-                      className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                        toStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
-                      }`}
-                    >
-                      <div className="font-medium text-sm">{stop.stop_name}</div>
-                      <div className="text-xs text-gray-600">
-                        Code: {stop.stop_code} • Zone: {stop.zone_id}
-                        {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
-                        <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
-                        {physicalStops.length > 1 && (
-                          <span className="ml-2 text-purple-600">• {physicalStops.length} platforms</span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                {filteredToStops.map(stop => (
+                  <button
+                    key={stop.stop_id}
+                    onClick={() => handleToStopSelect(stop)}
+                    className={`w-full text-left px-3 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
+                      toStopId === stop.stop_id ? 'bg-blue-50 text-blue-900' : ''
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{stop.stop_name}</div>
+                    <div className="text-xs text-gray-600">
+                      Code: {stop.stop_code} • Zone: {stop.zone_id}
+                      {stop.location_type === 1 && <span className="ml-2 text-red-600">• Interchange</span>}
+                      <span className="ml-2 text-blue-600">• {getRoutesServingStop(stop.stop_id).length} routes</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </div>
         </div>
 
-        {/* Departure Time */}
+        {/* Departure Time - FIXED to actually filter results */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             <Clock className="w-4 h-4 inline mr-1" />
-            Departure Time
+            Departure Time (Madrid)
           </label>
           <input
             type="time"
@@ -1021,7 +735,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
           {!departureTime && (
-            <p className="text-xs text-gray-500 mt-1">Leave empty for current time</p>
+            <p className="text-xs text-gray-500 mt-1">Leave empty for current Madrid time ({getCurrentTime()})</p>
           )}
         </div>
       </div>
@@ -1036,66 +750,27 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           {isPlanning ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Calculating accurate travel times...
+              Searching with departure time filter...
             </>
           ) : (
             <>
               <Navigation className="w-4 h-4" />
-              Find Best Route
+              Find Routes {departureTime && `(after ${departureTime})`}
             </>
           )}
         </button>
       </div>
 
-      {/* CONSOLIDATED Journey Results */}
+      {/* Enhanced Journey Results */}
       {journeyResults.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <RouteIcon className="w-5 h-5" />
-              {journeyResults[0].transfers === 0 ? (
-                <span className="text-green-600">🚌 Direct Routes Available ({journeyResults.length})</span>
-              ) : (
-                <span className="text-orange-600">🔄 Fastest Transfer Option</span>
-              )}
+              Journey Options ({journeyResults.length})
             </h4>
             <div className="text-sm text-gray-600">
-              ⏱️ Accurate travel times
-            </div>
-          </div>
-
-          {/* Time Accuracy Indicator */}
-          <div className="p-3 rounded-lg border-l-4 bg-blue-50 border-blue-400">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-600" />
-              <span className="text-sm font-medium text-blue-800">
-                ⏱️ Enhanced time calculations: Realistic speeds • Traffic consideration • Stop delays
-              </span>
-            </div>
-          </div>
-
-          {/* Consolidation Logic Indicator */}
-          <div className={`p-3 rounded-lg border-l-4 ${
-            journeyResults[0].transfers === 0 ? 
-              'bg-green-50 border-green-400' : 
-              'bg-orange-50 border-orange-400'
-          }`}>
-            <div className="flex items-center gap-2">
-              {journeyResults[0].transfers === 0 ? (
-                <>
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <span className="text-sm font-medium text-green-800">
-                    Direct routes found - Transfer options hidden
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Clock className="w-4 h-4 text-orange-600" />
-                  <span className="text-sm font-medium text-orange-800">
-                    No direct routes - Showing fastest transfer only
-                  </span>
-                </>
-              )}
+              {journeyResults.some(j => j.transfers === 0) ? 'Direct routes available' : 'Transfer routes only'}
             </div>
           </div>
           
@@ -1113,7 +788,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-bold text-gray-900">
-                      {journey.transfers === 0 ? `Direct Option ${index + 1}` : 'Fastest Transfer'}
+                      Option {index + 1}
                     </span>
                     
                     {/* Enhanced Journey Type Badges */}
@@ -1123,31 +798,20 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                       </span>
                     )}
                     {journey.transfers > 0 && (
-                      <span className="bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded-full font-medium">
-                        ⚡ Fastest Transfer
+                      <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full font-medium">
+                        🔄 {journey.transfers} Transfer{journey.transfers > 1 ? 's' : ''}
                       </span>
                     )}
                     
-                    {/* Enhanced Confidence Badge */}
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                      journey.confidence >= 80 ? 'bg-green-100 text-green-800' :
-                      journey.confidence >= 60 ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-orange-100 text-orange-800'
-                    }`}>
-                      {journey.confidence}% accurate
+                    {/* GTFS Time Badge */}
+                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
+                      📅 GTFS Standard Times
                     </span>
 
                     {/* Transfer Hub Info */}
                     {journey.transferStops && journey.transferStops.length > 0 && (
-                      <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-medium">
-                        via {journey.transferStops[0].stop_name.split('-')[0]}
-                      </span>
-                    )}
-
-                    {/* Walking Transfer Indicator */}
-                    {journey.walkingTime > 8 && (
                       <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full font-medium">
-                        🚶 {journey.walkingTime}m walk
+                        via {journey.transferStops[0].stop_name.split('-')[0]}
                       </span>
                     )}
                   </div>
@@ -1157,7 +821,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                     {formatDuration(journey.totalDuration)}
                   </div>
                   <div className="text-xs text-gray-600">
-                    {journey.totalDistance}km • Realistic time
+                    {journey.totalDistance}km • {journey.walkingTime}m transfer
                   </div>
                 </div>
               </div>
@@ -1171,9 +835,6 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                         <div className="flex items-center gap-2 text-xs text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
                           <ArrowRight className="w-3 h-3" />
                           Transfer at {routeSegment.fromStop.stop_name} ({journey.walkingTime}min)
-                          {journey.transferStops && journey.transferStops.length > 1 && (
-                            <span className="text-blue-600">• Walk to {journey.transferStops[1].stop_name}</span>
-                          )}
                         </div>
                       </div>
                     )}
@@ -1203,9 +864,6 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                         </div>
                         <div className="text-xs text-gray-600">
                           {formatDuration(routeSegment.duration)} • {routeSegment.stops.length - 1} stops
-                        </div>
-                        <div className="text-xs text-green-600 mt-1">
-                          ⏱️ Realistic timing
                         </div>
                       </div>
                     </div>
@@ -1242,7 +900,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                   </div>
                   <div className="text-center">
                     <div className="font-medium text-gray-900">{journey.walkingTime}m</div>
-                    <div className="text-gray-600">Walking</div>
+                    <div className="text-gray-600">Transfer</div>
                   </div>
                   <div className="text-center">
                     <div className="font-medium text-gray-900">
@@ -1263,14 +921,13 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Routes Found</h3>
           <p className="text-gray-600 mb-4">
-            Our enhanced routing couldn't find connections between these locations.
+            No routes found {departureTime && `after ${departureTime}`} between these stops.
           </p>
           <div className="text-sm text-gray-500 space-y-1">
-            <p>• ✅ Checked all direction combinations for direct routes</p>
-            <p>• ✅ Analyzed {consolidatedStops.length} physical locations</p>
-            <p>• ✅ Applied realistic travel time calculations</p>
-            <p>• ✅ Considered traffic and stop delays</p>
-            <p>• 💡 Try different departure times or nearby stops</p>
+            <p>• ✅ Checked direct routes with departure time filter</p>
+            <p>• ✅ Analyzed transfer options via major hubs</p>
+            <p>• ✅ Used standard GTFS scheduling data</p>
+            <p>• 💡 Try a different departure time or nearby stops</p>
           </div>
         </div>
       )}
@@ -1279,24 +936,24 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       {journeyResults.length === 0 && !fromStopId && !toStopId && (
         <div className="text-center py-8 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg">
           <Navigation className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">⏱️ Accurate Journey Planning</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">🚌 Enhanced Journey Planning</h3>
           <p className="text-gray-600 mb-4">
-            Enhanced time calculations with realistic travel speeds and traffic consideration.
+            Standard GTFS times with Madrid timezone support and departure time filtering.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
             <div className="space-y-2">
-              <h4 className="font-semibold text-gray-900">⏱️ Time Accuracy Features:</h4>
-              <p>• 🚌 Realistic bus speeds by zone</p>
-              <p>• 🚦 Traffic and stop delay consideration</p>
-              <p>• 📊 Distance-based duration validation</p>
-              <p>• 🎯 Conservative time estimates</p>
+              <h4 className="font-semibold text-gray-900">🔍 Enhanced Features:</h4>
+              <p>• 📅 Standard GTFS scheduling times</p>
+              <p>• 🕐 Madrid timezone awareness</p>
+              <p>• ⏰ Departure time filtering</p>
+              <p>• 🚌 Direct routes prioritized</p>
             </div>
             <div className="space-y-2">
-              <h4 className="font-semibold text-gray-900">🎯 Smart Routing:</h4>
-              <p>• Groups {stops.length} stops into {consolidatedStops.length} locations</p>
-              <p>• Handles inbound/outbound platforms</p>
-              <p>• Direct routes priority</p>
-              <p>• Fastest transfers when needed</p>
+              <h4 className="font-semibold text-gray-900">🎯 Smart Logic:</h4>
+              <p>• Shows direct routes when available</p>
+              <p>• Only shows transfers if no direct route</p>
+              <p>• Respects your departure time</p>
+              <p>• Uses official bus schedules</p>
             </div>
           </div>
         </div>
