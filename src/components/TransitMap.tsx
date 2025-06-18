@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
-import { Icon, LatLngBounds, Canvas, Point } from 'leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
+import { Icon, LatLngBounds } from 'leaflet';
 import { Stop, Route, Shape, Trip, StopTime } from '../types/gtfs';
 import { MapPin, Bus, Accessibility, Navigation, Info, Clock, ArrowRight, Router as RouteIcon } from 'lucide-react';
 
@@ -35,126 +35,8 @@ const selectedStopIcon = createCustomIcon('#FFB800', 28, true);
 const routeStopIcon = createCustomIcon('#00A8E6', 26, true);
 const routeStopHighlighted = createCustomIcon('#0066CC', 30, true);
 
-// Canvas-based route renderer for smooth, glitch-free rendering
-class RouteCanvasRenderer {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private map: any;
-  private routes: Array<{
-    points: [number, number][];
-    color: string;
-    weight: number;
-    opacity: number;
-    dashArray?: number[];
-  }> = [];
-
-  constructor(map: any) {
-    this.map = map;
-    this.canvas = document.createElement('canvas');
-    this.canvas.style.position = 'absolute';
-    this.canvas.style.top = '0';
-    this.canvas.style.left = '0';
-    this.canvas.style.pointerEvents = 'none';
-    this.canvas.style.zIndex = '200';
-    
-    const ctx = this.canvas.getContext('2d');
-    if (!ctx) throw new Error('Could not get canvas context');
-    this.ctx = ctx;
-    
-    // Add canvas to map container
-    const mapContainer = map.getContainer();
-    mapContainer.appendChild(this.canvas);
-    
-    // Bind events
-    this.map.on('viewreset', this.redraw.bind(this));
-    this.map.on('zoom', this.redraw.bind(this));
-    this.map.on('move', this.redraw.bind(this));
-    this.map.on('resize', this.resize.bind(this));
-    
-    this.resize();
-  }
-
-  resize() {
-    const size = this.map.getSize();
-    this.canvas.width = size.x;
-    this.canvas.height = size.y;
-    this.canvas.style.width = size.x + 'px';
-    this.canvas.style.height = size.y + 'px';
-    this.redraw();
-  }
-
-  setRoutes(routes: Array<{
-    points: [number, number][];
-    color: string;
-    weight: number;
-    opacity: number;
-    dashArray?: number[];
-  }>) {
-    this.routes = routes;
-    this.redraw();
-  }
-
-  redraw() {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    
-    this.routes.forEach(route => {
-      this.drawRoute(route);
-    });
-  }
-
-  private drawRoute(route: {
-    points: [number, number][];
-    color: string;
-    weight: number;
-    opacity: number;
-    dashArray?: number[];
-  }) {
-    if (route.points.length < 2) return;
-
-    const pixelPoints = route.points.map(point => 
-      this.map.latLngToContainerPoint(point)
-    );
-
-    this.ctx.save();
-    this.ctx.globalAlpha = route.opacity;
-    this.ctx.strokeStyle = route.color;
-    this.ctx.lineWidth = route.weight;
-    this.ctx.lineCap = 'round';
-    this.ctx.lineJoin = 'round';
-
-    // Set dash pattern if provided
-    if (route.dashArray) {
-      this.ctx.setLineDash(route.dashArray);
-    } else {
-      this.ctx.setLineDash([]);
-    }
-
-    this.ctx.beginPath();
-    pixelPoints.forEach((point, index) => {
-      if (index === 0) {
-        this.ctx.moveTo(point.x, point.y);
-      } else {
-        this.ctx.lineTo(point.x, point.y);
-      }
-    });
-    
-    this.ctx.stroke();
-    this.ctx.restore();
-  }
-
-  destroy() {
-    if (this.canvas && this.canvas.parentNode) {
-      this.canvas.parentNode.removeChild(this.canvas);
-    }
-    this.map.off('viewreset', this.redraw);
-    this.map.off('zoom', this.redraw);
-    this.map.off('move', this.redraw);
-    this.map.off('resize', this.resize);
-  }
-}
-
-// Component to handle canvas-based route rendering
-function CanvasRouteRenderer({ 
+// Enhanced Route Polyline Component with smooth rendering
+function RoutePolylines({ 
   shapes, 
   selectedRoute, 
   routes 
@@ -163,16 +45,19 @@ function CanvasRouteRenderer({
   selectedRoute?: string, 
   routes: Route[] 
 }) {
-  const map = useMap();
-  const rendererRef = useRef<RouteCanvasRenderer | null>(null);
+  const [routeLines, setRouteLines] = useState<Array<{
+    id: string;
+    positions: [number, number][];
+    color: string;
+    weight: number;
+    opacity: number;
+    dashArray?: string;
+    isMain: boolean;
+  }>>([]);
 
   useEffect(() => {
-    if (!rendererRef.current) {
-      rendererRef.current = new RouteCanvasRenderer(map);
-    }
-
     if (selectedRoute && shapes.length > 0) {
-      // Group shapes by shape_id
+      // Group shapes by shape_id for different itineraries
       const shapeGroups = shapes.reduce((acc, shape) => {
         if (!acc[shape.shape_id]) {
           acc[shape.shape_id] = [];
@@ -183,10 +68,10 @@ function CanvasRouteRenderer({
 
       // Get route color
       const route = routes.find(r => r.route_id === selectedRoute);
-      const baseColor = route?.route_color ? `#${route.route_color}` : '#8EBF42';
+      const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
 
-      // Prepare route data for canvas rendering
-      const canvasRoutes = Object.entries(shapeGroups).map(([shapeId, shapePoints], index) => {
+      // Create polyline data for each shape/itinerary
+      const lines = Object.entries(shapeGroups).map(([shapeId, shapePoints], index) => {
         const sortedPoints = shapePoints
           .sort((a, b) => a.shape_pt_sequence - b.shape_pt_sequence)
           .map(point => [point.shape_pt_lat, point.shape_pt_lon] as [number, number]);
@@ -194,28 +79,51 @@ function CanvasRouteRenderer({
         const isMainItinerary = index === 0;
         
         return {
-          points: sortedPoints,
+          id: shapeId,
+          positions: sortedPoints,
           color: baseColor,
           weight: isMainItinerary ? 8 : 6,
-          opacity: 0.95,
-          dashArray: isMainItinerary ? undefined : [12, 6]
+          opacity: 0.9,
+          dashArray: isMainItinerary ? undefined : '15,10',
+          isMain: isMainItinerary
         };
       });
 
-      rendererRef.current.setRoutes(canvasRoutes);
+      setRouteLines(lines);
     } else {
-      rendererRef.current.setRoutes([]);
+      setRouteLines([]);
     }
+  }, [shapes, selectedRoute, routes]);
 
-    return () => {
-      if (rendererRef.current) {
-        rendererRef.current.destroy();
-        rendererRef.current = null;
-      }
-    };
-  }, [shapes, selectedRoute, routes, map]);
-
-  return null;
+  return (
+    <>
+      {routeLines.map((line) => (
+        <Polyline
+          key={line.id}
+          positions={line.positions}
+          pathOptions={{
+            color: line.color,
+            weight: line.weight,
+            opacity: line.opacity,
+            dashArray: line.dashArray,
+            lineCap: 'round',
+            lineJoin: 'round',
+            smoothFactor: 1.5, // Smooth the line
+            interactive: false // Prevent interaction issues
+          }}
+          eventHandlers={{
+            add: (e) => {
+              // Ensure proper z-index
+              const layer = e.target;
+              if (layer._path) {
+                layer._path.style.zIndex = line.isMain ? '300' : '299';
+              }
+            }
+          }}
+        />
+      ))}
+    </>
+  );
 }
 
 // Enhanced component to fit map bounds to selected route with smooth animation
@@ -427,7 +335,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
   // Get route color with enhanced visibility
   const getRouteColor = (routeId: string): string => {
     const route = routes.find(r => r.route_id === routeId);
-    return route?.route_color ? `#${route.route_color}` : '#8EBF42';
+    return route?.route_color ? `#${route.route_color}` : '#0066CC';
   };
 
   const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
@@ -462,6 +370,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         zoom={11}
         className="h-full w-full"
         zoomControl={true}
+        preferCanvas={true} // Use canvas for better performance
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -475,8 +384,8 @@ export const TransitMap: React.FC<TransitMapProps> = ({
           routeStops={routeStops}
         />
         
-        {/* Canvas-based Route Rendering - No Glitch, Smooth Performance */}
-        <CanvasRouteRenderer
+        {/* Enhanced Route Polylines - Smooth, Road-Integrated Rendering */}
+        <RoutePolylines
           shapes={routeShapes}
           selectedRoute={selectedRoute}
           routes={routes}
@@ -711,7 +620,11 @@ export const TransitMap: React.FC<TransitMapProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-0.5 bg-blue-600 rounded"></div>
-                <span className="text-gray-700">Route</span>
+                <span className="text-gray-700">Main Route</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-0.5 bg-blue-400 rounded border-dashed border border-blue-400"></div>
+                <span className="text-gray-700">Variant</span>
               </div>
             </>
           )}
@@ -723,7 +636,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
         <div className="absolute top-4 right-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg px-3 py-1.5 z-[1000] shadow-lg">
           <div className="flex items-center gap-2 text-xs font-medium">
             <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-            <span>Route Active</span>
+            <span>Route Active • {routeShapes.length > 0 ? Math.round(routeShapes.length / 100) : 0}km</span>
           </div>
         </div>
       )}
