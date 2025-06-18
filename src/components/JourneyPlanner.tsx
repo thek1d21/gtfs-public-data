@@ -34,7 +34,7 @@ interface JourneyResult {
   transferStops?: Stop[];
 }
 
-// NEW: Stop consolidation interface for handling direction-specific stops
+// Stop consolidation interface for handling direction-specific stops
 interface ConsolidatedStop {
   baseLocation: string; // Base name without direction indicators
   physicalStops: Stop[]; // All stops at this physical location
@@ -73,7 +73,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     return Math.round(R * c * 100) / 100;
   };
 
-  // NEW: Consolidate stops by physical location
+  // Consolidate stops by physical location
   const consolidatedStops = useMemo(() => {
     const stopGroups = new Map<string, Stop[]>();
     
@@ -212,7 +212,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  // NEW: Get all physical stops for a given stop (including direction variants)
+  // Get all physical stops for a given stop (including direction variants)
   const getPhysicalStopsForLocation = (stopId: string): Stop[] => {
     const stop = stops.find(s => s.stop_id === stopId);
     if (!stop) return [stop].filter(Boolean) as Stop[];
@@ -224,7 +224,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     return consolidated ? consolidated.physicalStops : [stop];
   };
 
-  // Enhanced journey planning with stop consolidation
+  // CONSOLIDATED JOURNEY PLANNING LOGIC
   const planJourney = async () => {
     if (!fromStopId || !toStopId || fromStopId === toStopId) {
       return;
@@ -241,7 +241,7 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
         return;
       }
 
-      console.log('🚌 Enhanced journey planning with stop consolidation');
+      console.log('🚌 CONSOLIDATED Journey Planning - Direct Priority Logic');
       console.log(`📍 From: ${fromStop.stop_name} (${fromStop.stop_id})`);
       console.log(`📍 To: ${toStop.stop_name} (${toStop.stop_id})`);
 
@@ -252,40 +252,67 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       console.log(`🏢 From location has ${fromPhysicalStops.length} physical stops`);
       console.log(`🏢 To location has ${toPhysicalStops.length} physical stops`);
 
-      // Find routes using all physical stop combinations
-      const allJourneys: JourneyResult[] = [];
+      // STEP 1: Try to find DIRECT routes first
+      const directJourneys: JourneyResult[] = [];
       
-      // Try direct routes with all combinations
       for (const fromPhysical of fromPhysicalStops) {
         for (const toPhysical of toPhysicalStops) {
           const directRoutes = await findDirectRoutesEnhanced(fromPhysical, toPhysical);
-          allJourneys.push(...directRoutes);
+          directJourneys.push(...directRoutes);
         }
       }
       
-      console.log(`🎯 Found ${allJourneys.length} direct route combinations`);
+      console.log(`🎯 Found ${directJourneys.length} direct route options`);
 
-      // Try transfer routes with enhanced logic
-      const transferRoutes = await findTransferRoutesEnhanced(fromPhysicalStops, toPhysicalStops);
-      allJourneys.push(...transferRoutes);
-      
-      console.log(`🔄 Found ${transferRoutes.length} transfer route combinations`);
+      // CONSOLIDATION LOGIC: If direct routes exist, ONLY show direct routes
+      if (directJourneys.length > 0) {
+        console.log('✅ DIRECT ROUTES AVAILABLE - Showing only direct options');
+        
+        const bestDirectJourneys = directJourneys
+          .filter(journey => journey.routes.length > 0)
+          .sort((a, b) => {
+            // Sort by: confidence, then duration
+            if (a.confidence !== b.confidence) return b.confidence - a.confidence;
+            return a.totalDuration - b.totalDuration;
+          })
+          .slice(0, 5); // Show top 5 direct options
 
-      // Remove duplicates and rank results
-      const uniqueJourneys = removeDuplicateJourneys(allJourneys)
-        .filter(journey => journey.routes.length > 0)
-        .sort((a, b) => {
-          // Prioritize: confidence, then transfers, then duration
-          if (a.confidence !== b.confidence) return b.confidence - a.confidence;
-          if (a.transfers !== b.transfers) return a.transfers - b.transfers;
-          return a.totalDuration - b.totalDuration;
-        })
-        .slice(0, 12); // Show top 12 options
+        setJourneyResults(bestDirectJourneys);
+        console.log(`📋 Displaying ${bestDirectJourneys.length} direct journey options`);
+      } else {
+        // STEP 2: Only if NO direct routes, find transfer routes
+        console.log('🔄 NO DIRECT ROUTES - Searching for transfer options');
+        
+        const transferJourneys = await findTransferRoutesEnhanced(fromPhysicalStops, toPhysicalStops);
+        console.log(`🔄 Found ${transferJourneys.length} transfer route options`);
 
-      console.log(`✅ Final results: ${uniqueJourneys.length} unique journey options`);
-      setJourneyResults(uniqueJourneys);
+        if (transferJourneys.length > 0) {
+          // Show ONLY the fastest transfer option
+          const fastestTransfer = transferJourneys
+            .filter(journey => journey.routes.length > 0)
+            .sort((a, b) => {
+              // Sort by: transfers, then duration, then confidence
+              if (a.transfers !== b.transfers) return a.transfers - b.transfers;
+              if (a.totalDuration !== b.totalDuration) return a.totalDuration - b.totalDuration;
+              return b.confidence - a.confidence;
+            })[0]; // Take only the fastest
+
+          if (fastestTransfer) {
+            setJourneyResults([fastestTransfer]);
+            console.log('📋 Displaying FASTEST transfer option only');
+          } else {
+            setJourneyResults([]);
+            console.log('❌ No valid transfer routes found');
+          }
+        } else {
+          setJourneyResults([]);
+          console.log('❌ No routes found (direct or transfer)');
+        }
+      }
+
     } catch (error) {
-      console.error('❌ Error in enhanced journey planning:', error);
+      console.error('❌ Error in consolidated journey planning:', error);
+      setJourneyResults([]);
     } finally {
       setIsPlanning(false);
     }
@@ -635,17 +662,6 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
     return endTotalMinutes - startTotalMinutes;
   };
 
-  // Remove duplicate journeys
-  const removeDuplicateJourneys = (journeys: JourneyResult[]): JourneyResult[] => {
-    const seen = new Set<string>();
-    return journeys.filter(journey => {
-      const key = `${journey.fromStop.stop_id}-${journey.toStop.stop_id}-${journey.routes.map(r => `${r.route.route_id}-${r.direction}`).join('-')}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  };
-
   // Format time for display
   const formatTime = (timeStr: string): string => {
     if (!timeStr || !timeStr.includes(':')) return 'N/A';
@@ -721,8 +737,8 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
             <Navigation className="w-6 h-6 text-blue-600" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">🚌 Smart Journey Planner</h3>
-            <p className="text-sm text-gray-600">Direction-aware • Stop consolidation • Physical location matching</p>
+            <h3 className="text-lg font-semibold text-gray-900">🎯 Consolidated Journey Planner</h3>
+            <p className="text-sm text-gray-600">Direct routes priority • Fastest transfers only • Smart consolidation</p>
           </div>
         </div>
         {(fromStopId || toStopId || journeyResults.length > 0) && (
@@ -878,27 +894,59 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           {isPlanning ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              Smart routing with stop consolidation...
+              Consolidated routing: Direct priority...
             </>
           ) : (
             <>
               <Navigation className="w-4 h-4" />
-              Find Smart Routes
+              Find Best Route
             </>
           )}
         </button>
       </div>
 
-      {/* Enhanced Journey Results */}
+      {/* CONSOLIDATED Journey Results */}
       {journeyResults.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <RouteIcon className="w-5 h-5" />
-              Smart Journey Options ({journeyResults.length})
+              {journeyResults[0].transfers === 0 ? (
+                <span className="text-green-600">🚌 Direct Routes Available ({journeyResults.length})</span>
+              ) : (
+                <span className="text-orange-600">🔄 Fastest Transfer Option</span>
+              )}
             </h4>
             <div className="text-sm text-gray-600">
-              🧠 Direction-aware • 🏢 Stop consolidation
+              {journeyResults[0].transfers === 0 ? 
+                '✅ Showing direct routes only' : 
+                '⚡ Fastest transfer route'
+              }
+            </div>
+          </div>
+
+          {/* Consolidation Logic Indicator */}
+          <div className={`p-3 rounded-lg border-l-4 ${
+            journeyResults[0].transfers === 0 ? 
+              'bg-green-50 border-green-400' : 
+              'bg-orange-50 border-orange-400'
+          }`}>
+            <div className="flex items-center gap-2">
+              {journeyResults[0].transfers === 0 ? (
+                <>
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-800">
+                    Direct routes found - Transfer options hidden
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span className="text-sm font-medium text-orange-800">
+                    No direct routes - Showing fastest transfer only
+                  </span>
+                </>
+              )}
             </div>
           </div>
           
@@ -916,18 +964,18 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-bold text-gray-900">
-                      Option {index + 1}
+                      {journey.transfers === 0 ? `Direct Option ${index + 1}` : 'Fastest Transfer'}
                     </span>
                     
                     {/* Enhanced Journey Type Badges */}
                     {journey.transfers === 0 && (
                       <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-medium">
-                        🚌 Direct
+                        🚌 Direct Route
                       </span>
                     )}
                     {journey.transfers > 0 && (
-                      <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full font-medium">
-                        🔄 {journey.transfers} Transfer{journey.transfers > 1 ? 's' : ''}
+                      <span className="bg-orange-100 text-orange-800 text-xs px-2 py-1 rounded-full font-medium">
+                        ⚡ Fastest Transfer
                       </span>
                     )}
                     
@@ -1063,10 +1111,10 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
           <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No Routes Found</h3>
           <p className="text-gray-600 mb-4">
-            Our smart routing couldn't find connections between these locations.
+            Our consolidated routing couldn't find connections between these locations.
           </p>
           <div className="text-sm text-gray-500 space-y-1">
-            <p>• ✅ Checked all direction combinations</p>
+            <p>• ✅ Checked all direction combinations for direct routes</p>
             <p>• ✅ Analyzed {consolidatedStops.length} physical locations</p>
             <p>• ✅ Searched {stops.filter(s => s.location_type === 1).length} official interchanges</p>
             <p>• ✅ Considered walking transfers between platforms</p>
@@ -1079,24 +1127,24 @@ export const JourneyPlanner: React.FC<JourneyPlannerProps> = ({
       {journeyResults.length === 0 && !fromStopId && !toStopId && (
         <div className="text-center py-8 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg">
           <Navigation className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">🧠 Smart Journey Planning</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">🎯 Consolidated Journey Planning</h3>
           <p className="text-gray-600 mb-4">
-            Advanced stop consolidation handles direction-specific stops and finds the fastest routes.
+            Smart routing that prioritizes direct routes and shows only the fastest transfer when needed.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
             <div className="space-y-2">
-              <h4 className="font-semibold text-gray-900">🚀 Smart Features:</h4>
+              <h4 className="font-semibold text-gray-900">🎯 Consolidation Logic:</h4>
+              <p>• 🚌 Direct routes shown when available</p>
+              <p>• 🔄 Transfer options only when no direct routes</p>
+              <p>• ⚡ Always shows fastest option</p>
               <p>• 🏢 Physical stop consolidation</p>
-              <p>• 🔄 Direction-aware routing</p>
-              <p>• 🚶 Walking transfer detection</p>
-              <p>• 📊 Confidence scoring system</p>
             </div>
             <div className="space-y-2">
               <h4 className="font-semibold text-gray-900">🎯 How it works:</h4>
               <p>• Groups {stops.length} stops into {consolidatedStops.length} locations</p>
               <p>• Handles inbound/outbound platforms</p>
-              <p>• Finds optimal transfer points</p>
-              <p>• Optimizes for time and reliability</p>
+              <p>• Prioritizes user experience</p>
+              <p>• Optimizes for simplicity and speed</p>
             </div>
           </div>
         </div>
