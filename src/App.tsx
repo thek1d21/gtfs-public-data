@@ -14,6 +14,7 @@ import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ServiceCalendar } from './components/ServiceCalendar';
 import { RouteDetails } from './components/RouteDetails';
+import { JourneyPlanner } from './components/JourneyPlanner';
 
 interface GTFSData {
   stops: Stop[];
@@ -32,6 +33,25 @@ interface GTFSData {
   stopAnalytics: StopAnalytics[];
 }
 
+interface JourneyResult {
+  id: string;
+  fromStop: Stop;
+  toStop: Stop;
+  routes: Array<{
+    route: Route;
+    fromStop: Stop;
+    toStop: Stop;
+    departureTime: string;
+    arrivalTime: string;
+    duration: number;
+    stops: Stop[];
+  }>;
+  totalDuration: number;
+  totalDistance: number;
+  transfers: number;
+  walkingTime: number;
+}
+
 function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +59,7 @@ function App() {
   const [selectedRoute, setSelectedRoute] = useState<string | undefined>();
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedRouteDetails, setSelectedRouteDetails] = useState<Route | null>(null);
+  const [selectedJourney, setSelectedJourney] = useState<JourneyResult | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -60,6 +81,7 @@ function App() {
 
   const handleRouteSelect = (routeId: string | undefined) => {
     setSelectedRoute(routeId);
+    setSelectedJourney(null); // Clear journey when selecting route
     if (activeTab !== 'overview') {
       setActiveTab('overview');
     }
@@ -72,6 +94,18 @@ function App() {
   const handleStopClick = (stop: Stop) => {
     console.log('Stop clicked:', stop);
     // Additional stop click handling can be added here
+  };
+
+  const handleJourneySelect = (journey: JourneyResult) => {
+    setSelectedJourney(journey);
+    setSelectedRoute(undefined); // Clear route selection when planning journey
+    
+    // Highlight the journey routes on the map
+    if (journey.routes.length > 0) {
+      // For now, select the first route of the journey
+      // In a more advanced implementation, we could highlight all routes
+      setSelectedRoute(journey.routes[0].route.route_id);
+    }
   };
 
   if (loading) {
@@ -127,6 +161,16 @@ function App() {
             servicePatterns={data.servicePatterns}
           />
         );
+      case 'planner':
+        return (
+          <JourneyPlanner
+            stops={data.stops}
+            routes={data.routes}
+            trips={data.trips}
+            stopTimes={data.stopTimes}
+            onJourneySelect={handleJourneySelect}
+          />
+        );
       default:
         return (
           <>
@@ -172,6 +216,58 @@ function App() {
                 </div>
               </div>
             </div>
+
+            {/* Journey Information Panel */}
+            {selectedJourney && (
+              <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Navigation className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-blue-900">Selected Journey</h3>
+                      <p className="text-sm text-blue-700">
+                        {selectedJourney.fromStop.stop_name} → {selectedJourney.toStop.stop_name}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedJourney(null)}
+                    className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                  >
+                    Clear Journey
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {Math.round(selectedJourney.totalDuration / 60 * 10) / 10}h
+                    </div>
+                    <div className="text-sm text-gray-600">Total Time</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-green-600">
+                      {selectedJourney.totalDistance}km
+                    </div>
+                    <div className="text-sm text-gray-600">Distance</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-purple-600">
+                      {selectedJourney.transfers}
+                    </div>
+                    <div className="text-sm text-gray-600">Transfers</div>
+                  </div>
+                  <div className="bg-white rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-orange-600">
+                      {selectedJourney.routes.length}
+                    </div>
+                    <div className="text-sm text-gray-600">Routes</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         );
     }
@@ -192,7 +288,7 @@ function App() {
             Last updated: {feedInfo?.feed_version || 'Unknown'}
           </p>
           <p className="mt-1">
-            Enhanced Madrid Transit Dashboard with comprehensive GTFS data analysis
+            Enhanced Madrid Transit Dashboard with comprehensive GTFS data analysis and journey planning
           </p>
         </div>
       </main>
