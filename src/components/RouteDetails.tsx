@@ -65,6 +65,12 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({
 }) => {
   const [selectedDirection, setSelectedDirection] = useState<number>(0);
 
+  // Helper function - moved before its usage
+  const timeToMinutes = (timeStr: string): number => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
   // Get route-specific data
   const routeTrips = useMemo(() => 
     trips.filter(trip => trip.route_id === route.route_id), 
@@ -144,12 +150,7 @@ export const RouteDetails: React.FC<RouteDetailsProps> = ({
       totalDepartures: departureTimes.length,
       avgFrequency: avgFrequency > 0 ? `${avgFrequency} min` : 'N/A'
     };
-  }, [stopTimes, directionTrips]);
-
-  const timeToMinutes = (timeStr: string): number => {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
+  }, [stopTimes, directionTrips, timeToMinutes]);
 
   const directions = useMemo(() => 
     [...new Set(routeTrips.map(trip => trip.direction_id))],
