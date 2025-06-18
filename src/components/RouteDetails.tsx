@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Route, Trip, StopTime, Stop, Shape, RouteAnalytics } from '../types/gtfs';
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import { Bus, Clock, MapPin, Users, Accessibility, TrendingUp, Navigation, X, ArrowRight, Calendar, Zap, Router as RouteIcon } from 'lucide-react';
 import { LatLngBounds } from 'leaflet';
 
@@ -14,7 +14,7 @@ interface RouteDetailsProps {
   onClose: () => void;
 }
 
-// Map bounds component
+// Map bounds component - FIXED: Proper useMap import
 function MapBounds({ 
   routeStops, 
   shapes 
@@ -22,7 +22,7 @@ function MapBounds({
   routeStops: Stop[], 
   shapes: Shape[]
 }) {
-  const map = require('react-leaflet').useMap();
+  const map = useMap(); // FIXED: Direct import instead of require
 
   React.useEffect(() => {
     if (routeStops.length > 0 || shapes.length > 0) {
