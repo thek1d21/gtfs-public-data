@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bus, BarChart3, Clock, Calendar, Map, Navigation as NavigationIcon } from 'lucide-react';
+import { Bus, Clock, Calendar, Map, Navigation as NavigationIcon } from 'lucide-react';
 
 interface NavigationProps {
   activeTab: string;
@@ -10,7 +10,6 @@ export const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }
   const tabs = [
     { id: 'overview', label: 'Overview', icon: Map },
     { id: 'planner', label: 'Journey Planner', icon: NavigationIcon },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'schedule', label: 'Schedules', icon: Clock },
     { id: 'calendar', label: 'Service Calendar', icon: Calendar },
   ];

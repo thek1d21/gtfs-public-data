@@ -10,7 +10,6 @@ import { StatsPanel } from './components/StatsPanel';
 import { Header } from './components/Header';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { Navigation } from './components/Navigation';
-import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ServiceCalendar } from './components/ServiceCalendar';
 import { RouteDetails } from './components/RouteDetails';
@@ -137,14 +136,6 @@ function App() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'analytics':
-        return (
-          <AnalyticsDashboard
-            routeAnalytics={data.routeAnalytics}
-            servicePatterns={data.servicePatterns}
-            stopAnalytics={data.stopAnalytics}
-          />
-        );
       case 'schedule':
         return (
           <ScheduleViewer
