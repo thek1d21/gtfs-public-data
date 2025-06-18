@@ -10,6 +10,15 @@ interface ScheduleViewerProps {
   routes: Route[];
 }
 
+interface RouteDirectionInfo {
+  route: Route;
+  direction: number;
+  directionLabel: string;
+  finalDestination: string;
+  tripCount: number;
+  departureCount: number;
+}
+
 export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
   stopTimes,
   trips,
@@ -75,20 +84,81 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
     );
   }, [routes, searchTerm]);
 
-  // Get available directions for selected route or stop
+  // ENHANCED: Get route directions for selected stop - shows ALL routes serving the stop
+  const getRouteDirectionsForStop = (stopId: string): RouteDirectionInfo[] => {
+    console.log(`🔍 Getting route directions for stop: ${stopId}`);
+    
+    // Get all stop times for this stop
+    const stopStopTimes = stopTimes.filter(st => st.stop_id === stopId);
+    console.log(`📊 Found ${stopStopTimes.length} stop times for this stop`);
+    
+    // Get all trips that serve this stop
+    const stopTripIds = stopStopTimes.map(st => st.trip_id);
+    const stopTrips = trips.filter(trip => stopTripIds.includes(trip.trip_id));
+    console.log(`🚌 Found ${stopTrips.length} trips serving this stop`);
+    
+    // Group by route and direction
+    const routeDirectionMap = new Map<string, {
+      route: Route;
+      direction: number;
+      trips: Trip[];
+      stopTimes: StopTime[];
+    }>();
+
+    stopTrips.forEach(trip => {
+      const route = routes.find(r => r.route_id === trip.route_id);
+      if (!route) return;
+
+      const key = `${trip.route_id}-${trip.direction_id}`;
+      if (!routeDirectionMap.has(key)) {
+        routeDirectionMap.set(key, {
+          route,
+          direction: trip.direction_id,
+          trips: [],
+          stopTimes: []
+        });
+      }
+      
+      const entry = routeDirectionMap.get(key)!;
+      entry.trips.push(trip);
+      
+      // Add stop times for this trip at this stop
+      const tripStopTimesAtStop = stopStopTimes.filter(st => st.trip_id === trip.trip_id);
+      entry.stopTimes.push(...tripStopTimesAtStop);
+    });
+
+    console.log(`🎯 Found ${routeDirectionMap.size} route-direction combinations`);
+
+    // Convert to RouteDirectionInfo array
+    const routeDirections = Array.from(routeDirectionMap.values()).map(({ route, direction, trips, stopTimes }) => {
+      const directionLabel = direction === 0 ? 'Outbound (Ida)' : 'Inbound (Vuelta)';
+      const finalDestination = getFinalDestination(trips, direction);
+      
+      return {
+        route,
+        direction,
+        directionLabel,
+        finalDestination,
+        tripCount: trips.length,
+        departureCount: stopTimes.length
+      };
+    }).sort((a, b) => {
+      // Sort by route number first, then by direction
+      const routeCompare = a.route.route_short_name.localeCompare(b.route.route_short_name);
+      if (routeCompare !== 0) return routeCompare;
+      return a.direction - b.direction;
+    });
+
+    console.log(`✅ Processed route directions:`, routeDirections);
+    return routeDirections;
+  };
+
+  // Get available directions for selected route
   const availableDirections = useMemo(() => {
-    if (!selectedRoute && !selectedStop) return [];
+    if (!selectedRoute) return [];
 
     let relevantTrips: Trip[] = [];
-
-    if (selectedRoute) {
-      relevantTrips = trips.filter(trip => trip.route_id === selectedRoute);
-    } else if (selectedStop) {
-      const stopTripIds = stopTimes
-        .filter(st => st.stop_id === selectedStop)
-        .map(st => st.trip_id);
-      relevantTrips = trips.filter(trip => stopTripIds.includes(trip.trip_id));
-    }
+    relevantTrips = trips.filter(trip => trip.route_id === selectedRoute);
 
     const directions = [...new Set(relevantTrips.map(trip => trip.direction_id))];
     
@@ -104,7 +174,7 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
         tripCount: directionTrips.length
       };
     }).sort((a, b) => a.direction - b.direction);
-  }, [selectedRoute, selectedStop, trips, stopTimes, getFinalDestination]);
+  }, [selectedRoute, trips, stopTimes, getFinalDestination]);
 
   // Only process schedule data when all selections are made (including direction)
   const scheduleData = useMemo(() => {
@@ -227,8 +297,25 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
 
   const getSelectedDirectionInfo = () => {
     if (selectedDirection === null) return null;
-    const directionInfo = availableDirections.find(d => d.direction === selectedDirection);
-    return directionInfo;
+    
+    if (selectionType === 'route') {
+      const directionInfo = availableDirections.find(d => d.direction === selectedDirection);
+      return directionInfo;
+    } else if (selectionType === 'stop') {
+      // For stop selection, we need to find the direction info from the route directions
+      const routeDirections = getRouteDirectionsForStop(selectedStop);
+      const directionInfo = routeDirections.find(rd => 
+        rd.route.route_id === selectedRoute && rd.direction === selectedDirection
+      );
+      return directionInfo ? {
+        direction: directionInfo.direction,
+        label: directionInfo.directionLabel,
+        finalDestination: directionInfo.finalDestination,
+        tripCount: directionInfo.tripCount
+      } : null;
+    }
+    
+    return null;
   };
 
   return (
@@ -375,7 +462,7 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
         </div>
       )}
 
-      {/* Stop Selection Interface */}
+      {/* ENHANCED: Stop Selection Interface */}
       {selectionType === 'stop' && !selectedStop && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-6">
@@ -385,7 +472,7 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Select a Stop</h3>
-                <p className="text-sm text-gray-600">Choose a bus stop to view routes and directions</p>
+                <p className="text-sm text-gray-600">Choose a bus stop to view all routes and directions serving it</p>
               </div>
             </div>
             <button
@@ -448,8 +535,163 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
         </div>
       )}
 
-      {/* Direction Selection Interface - CRITICAL NEW STEP */}
-      {(selectedRoute || selectedStop) && selectedDirection === null && (
+      {/* ENHANCED: Route & Direction Selection for Selected Stop */}
+      {selectionType === 'stop' && selectedStop && !selectedRoute && (
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-50 rounded-lg">
+                <Bus className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Routes Serving This Stop</h3>
+                <p className="text-sm text-gray-600">
+                  All routes and directions for: <strong>{getSelectedItemName()}</strong>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={resetSelection}
+              className="text-sm text-gray-500 hover:text-gray-700 font-medium"
+            >
+              ← Change Stop
+            </button>
+          </div>
+
+          {/* Selected Stop Info */}
+          <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border border-green-200 mb-6">
+            <div className="flex items-center gap-3">
+              <MapPin className="w-5 h-5 text-green-600" />
+              <div>
+                <h4 className="font-semibold text-green-900">{getSelectedItemName()}</h4>
+                <p className="text-sm text-green-700">
+                  {getRouteDirectionsForStop(selectedStop).length} route directions available
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Route Directions Grid */}
+          {(() => {
+            const routeDirections = getRouteDirectionsForStop(selectedStop);
+            
+            if (routeDirections.length === 0) {
+              return (
+                <div className="text-center py-8 bg-gray-50 rounded-lg">
+                  <Bus className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <h5 className="text-lg font-semibold text-gray-900 mb-2">No Routes Found</h5>
+                  <p className="text-gray-600">No routes serve this stop.</p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                <div className="text-center mb-6">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">
+                    🚌 Choose a Route & Direction
+                  </h4>
+                  <p className="text-gray-600">
+                    Select a route and direction to view departure schedules
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {routeDirections.map((routeDir, index) => (
+                    <button
+                      key={`${routeDir.route.route_id}-${routeDir.direction}`}
+                      onClick={() => {
+                        setSelectedRoute(routeDir.route.route_id);
+                        setSelectedDirection(routeDir.direction);
+                      }}
+                      className={`p-6 rounded-xl border-2 transition-all text-left ${
+                        routeDir.direction === 0 
+                          ? 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-300 hover:border-blue-400' 
+                          : 'bg-gradient-to-br from-purple-50 to-purple-100 border-purple-300 hover:border-purple-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className={`route-badge ${routeDir.route.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
+                          {routeDir.route.route_short_name}
+                        </div>
+                        <div className={`p-2 rounded-lg ${
+                          routeDir.direction === 0 ? 'bg-blue-200' : 'bg-purple-200'
+                        }`}>
+                          <Navigation className={`w-4 h-4 ${
+                            routeDir.direction === 0 ? 'text-blue-700' : 'text-purple-700'
+                          } ${routeDir.direction === 0 ? '' : 'transform rotate-180'}`} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h5 className={`font-semibold ${
+                          routeDir.direction === 0 ? 'text-blue-900' : 'text-purple-900'
+                        }`}>
+                          {routeDir.route.route_long_name}
+                        </h5>
+                        
+                        <div className={`text-sm ${
+                          routeDir.direction === 0 ? 'text-blue-700' : 'text-purple-700'
+                        }`}>
+                          <div className="font-medium">{routeDir.directionLabel}</div>
+                          <div className="flex items-center gap-1 mt-1">
+                            <ArrowRight className="w-3 h-3" />
+                            <span>Towards: {routeDir.finalDestination}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-3">
+                          <div className={`bg-white rounded-lg p-2 text-center ${
+                            routeDir.direction === 0 ? 'border border-blue-200' : 'border border-purple-200'
+                          }`}>
+                            <div className={`text-lg font-bold ${
+                              routeDir.direction === 0 ? 'text-blue-600' : 'text-purple-600'
+                            }`}>
+                              {routeDir.tripCount}
+                            </div>
+                            <div className="text-xs text-gray-600">Trips</div>
+                          </div>
+                          <div className={`bg-white rounded-lg p-2 text-center ${
+                            routeDir.direction === 0 ? 'border border-blue-200' : 'border border-purple-200'
+                          }`}>
+                            <div className={`text-lg font-bold ${
+                              routeDir.direction === 0 ? 'text-blue-600' : 'text-purple-600'
+                            }`}>
+                              {routeDir.departureCount}
+                            </div>
+                            <div className="text-xs text-gray-600">Departures</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 text-right">
+                        <ChevronRight className={`w-5 h-5 ${
+                          routeDir.direction === 0 ? 'text-blue-600' : 'text-purple-600'
+                        }`} />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-6 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertCircle className="w-5 h-5 text-yellow-600" />
+                    <h5 className="font-semibold text-yellow-900">Multiple Routes Available</h5>
+                  </div>
+                  <p className="text-sm text-yellow-800">
+                    This stop is served by <strong>{routeDirections.length} route directions</strong>. 
+                    Each route-direction combination has different schedules and destinations. 
+                    Select one to view its specific departure times.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Direction Selection Interface for Route Selection */}
+      {selectionType === 'route' && selectedRoute && selectedDirection === null && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
@@ -474,13 +716,9 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
           {/* Selected Item Info */}
           <div className="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200 mb-6">
             <div className="flex items-center gap-3">
-              {selectionType === 'route' ? (
-                <div className={`route-badge ${routes.find(r => r.route_id === selectedRoute)?.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
-                  {routes.find(r => r.route_id === selectedRoute)?.route_short_name}
-                </div>
-              ) : (
-                <MapPin className="w-5 h-5 text-purple-600" />
-              )}
+              <div className={`route-badge ${routes.find(r => r.route_id === selectedRoute)?.route_color === '8EBF42' ? 'route-badge-green' : 'route-badge-red'}`}>
+                {routes.find(r => r.route_id === selectedRoute)?.route_short_name}
+              </div>
               <div>
                 <h4 className="font-semibold text-purple-900">{getSelectedItemName()}</h4>
                 <p className="text-sm text-purple-700">
@@ -577,7 +815,7 @@ export const ScheduleViewer: React.FC<ScheduleViewerProps> = ({
             <div className="text-center py-8 bg-gray-50 rounded-lg">
               <Navigation className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <h5 className="text-lg font-semibold text-gray-900 mb-2">No Directions Available</h5>
-              <p className="text-gray-600">No direction information found for the selected {selectionType}.</p>
+              <p className="text-gray-600">No direction information found for the selected route.</p>
             </div>
           )}
         </div>
