@@ -17,6 +17,7 @@ import { JourneyPlanner } from './components/JourneyPlanner';
 import { NotificationManager } from './components/NotificationManager';
 import { NotificationBanner } from './components/NotificationBanner';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 interface GTFSData {
   stops: Stop[];
@@ -119,12 +120,12 @@ function AppContent() {
 
   if (error || !data) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
             Error Loading Data
           </h2>
-          <p className="text-gray-600 mb-4">
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
             {error || 'Unable to load transit data'}
           </p>
           <button
@@ -215,7 +216,7 @@ function AppContent() {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               {/* Sidebar */}
               <div className="lg:col-span-1 space-y-6">
-                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
                   <RouteList
                     routes={data.routes}
                     selectedRoute={selectedRoute}
@@ -228,7 +229,7 @@ function AppContent() {
 
               {/* Map */}
               <div className="lg:col-span-3">
-                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 h-[600px]">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-700 h-[600px]">
                   <TransitMap
                     stops={data.stops}
                     routes={data.routes}
@@ -244,51 +245,51 @@ function AppContent() {
 
             {/* Journey Information Panel */}
             {selectedJourney && (
-              <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200">
+              <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-6 border border-blue-200 dark:border-blue-800">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <Navigation className="w-5 h-5 text-blue-600" />
+                    <div className="p-2 bg-blue-100 dark:bg-blue-800 rounded-lg">
+                      <Navigation className="w-5 h-5 text-blue-600 dark:text-blue-300" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-blue-900">Selected Journey</h3>
-                      <p className="text-sm text-blue-700">
+                      <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">Selected Journey</h3>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
                         {selectedJourney.fromStop.stop_name} → {selectedJourney.toStop.stop_name}
                       </p>
                     </div>
                   </div>
                   <button
                     onClick={() => setSelectedJourney(null)}
-                    className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                    className="text-blue-600 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-100 font-medium text-sm"
                   >
                     Clear Journey
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="bg-white rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-blue-600">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                       {Math.round(selectedJourney.totalDuration / 60 * 10) / 10}h
                     </div>
-                    <div className="text-sm text-gray-600">Total Time</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Total Time</div>
                   </div>
-                  <div className="bg-white rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-green-600">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                       {selectedJourney.totalDistance}km
                     </div>
-                    <div className="text-sm text-gray-600">Distance</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Distance</div>
                   </div>
-                  <div className="bg-white rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-purple-600">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
                       {selectedJourney.transfers}
                     </div>
-                    <div className="text-sm text-gray-600">Transfers</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Transfers</div>
                   </div>
-                  <div className="bg-white rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-orange-600">
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
                       {selectedJourney.routes.length}
                     </div>
-                    <div className="text-sm text-gray-600">Routes</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Routes</div>
                   </div>
                 </div>
               </div>
@@ -299,7 +300,7 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Header feedInfo={feedInfo} />
       <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
       
@@ -311,18 +312,18 @@ function AppContent() {
               notifications={relevantNotifications}
               onDismiss={dismissNotification}
             />
-            <div className="mt-2 text-xs text-gray-500 text-center">
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
               {selectedRoute && (
-                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full mr-2">
+                <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-2 py-1 rounded-full mr-2">
                   Route {data.routes.find(r => r.route_id === selectedRoute)?.route_short_name} notifications included
                 </span>
               )}
               {activeTab !== 'overview' && (
-                <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full mr-2">
+                <span className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 px-2 py-1 rounded-full mr-2">
                   {activeTab} page notifications included
                 </span>
               )}
-              <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full">
+              <span className="bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 px-2 py-1 rounded-full">
                 Global notifications included
               </span>
             </div>
@@ -332,7 +333,7 @@ function AppContent() {
         {renderContent()}
 
         {/* Footer Info */}
-        <div className="mt-8 text-center text-sm text-gray-600">
+        <div className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
           <p>
             Data provided by {feedInfo?.feed_publisher_name || 'CRTM'} • 
             Last updated: {feedInfo?.feed_version || 'Unknown'}
@@ -361,9 +362,11 @@ function AppContent() {
 
 function App() {
   return (
-    <NotificationProvider>
-      <AppContent />
-    </NotificationProvider>
+    <ThemeProvider>
+      <NotificationProvider>
+        <AppContent />
+      </NotificationProvider>
+    </ThemeProvider>
   );
 }
 
