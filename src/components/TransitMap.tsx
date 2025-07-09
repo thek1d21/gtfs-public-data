@@ -59,15 +59,15 @@ function EnhancedRoutePolylines({
   }>>([]);
 
   useEffect(() => {
-    if (!selectedRoute || !shapes || shapes.length === 0) {
+    if (!selectedRoute || !shapes || !Array.isArray(shapes) || shapes.length === 0) {
       setRouteLines([]);
       return;
     }
 
     try {
       // Get route trips to determine directions
-      const routeTrips = trips.filter(trip => trip.route_id === selectedRoute);
-      const route = routes.find(r => r.route_id === selectedRoute);
+      const routeTrips = (trips || []).filter(trip => trip.route_id === selectedRoute);
+      const route = (routes || []).find(r => r.route_id === selectedRoute);
       const baseColor = route?.route_color ? `#${route.route_color}` : '#0066CC';
       
       // Create color variations for directions
@@ -266,21 +266,21 @@ export const TransitMap: React.FC<TransitMapProps> = ({
   useEffect(() => {
     if (selectedRoute) {
       // Get all trips for selected route
-      const routeTripsData = trips.filter(trip => trip.route_id === selectedRoute);
+      const routeTripsData = (trips || []).filter(trip => trip.route_id === selectedRoute);
       setRouteTrips(routeTripsData);
       
       // Get all unique shape IDs for this route
       const shapeIds = [...new Set(routeTripsData.map(trip => trip.shape_id).filter(Boolean))];
       
       // Get all shapes for this route
-      const routeShapePoints = shapes.filter(shape => shapeIds.includes(shape.shape_id));
+      const routeShapePoints = (shapes || []).filter(shape => shapeIds.includes(shape.shape_id));
       setRouteShapes(routeShapePoints);
       
       // Get all stops for this route
       const routeTripIds = routeTripsData.map(trip => trip.trip_id);
-      const routeStopTimes = stopTimes.filter(st => routeTripIds.includes(st.trip_id));
+      const routeStopTimes = (stopTimes || []).filter(st => routeTripIds.includes(st.trip_id));
       const uniqueStopIds = [...new Set(routeStopTimes.map(st => st.stop_id))];
-      const stopsForRoute = stops.filter(stop => uniqueStopIds.includes(stop.stop_id));
+      const stopsForRoute = (stops || []).filter(stop => uniqueStopIds.includes(stop.stop_id));
       
       // Sort stops by sequence
       const sortedRouteStops = stopsForRoute.sort((a, b) => {
@@ -292,14 +292,14 @@ export const TransitMap: React.FC<TransitMapProps> = ({
       setRouteStops(sortedRouteStops);
       
       // HIDE OTHER ROUTE POINTS: Only show route stops + major interchanges
-      const majorInterchanges = stops.filter(stop => 
+      const majorInterchanges = (stops || []).filter(stop => 
         stop.location_type === 1 && !uniqueStopIds.includes(stop.stop_id)
       );
       
       setFilteredStops([...stopsForRoute, ...majorInterchanges]);
     } else {
       // Show all stops when no route is selected
-      setFilteredStops(stops);
+      setFilteredStops(stops || []);
       setRouteShapes([]);
       setRouteStops([]);
       setRouteTrips([]);
@@ -330,11 +330,11 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     const currentTime = new Date();
     const currentTimeStr = `${currentTime.getHours().toString().padStart(2, '0')}:${currentTime.getMinutes().toString().padStart(2, '0')}:00`;
     
-    const stopStopTimes = stopTimes.filter(st => st.stop_id === stop.stop_id);
+    const stopStopTimes = (stopTimes || []).filter(st => st.stop_id === stop.stop_id);
     const routeArrivals = new Map<string, string[]>();
     
     stopStopTimes.forEach(st => {
-      const trip = trips.find(t => t.trip_id === st.trip_id);
+      const trip = (trips || []).find(t => t.trip_id === st.trip_id);
       if (!trip || !st.departure_time) return;
       
       if (st.departure_time >= currentTimeStr) {
@@ -346,7 +346,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     });
     
     const routeInfo = Array.from(routeArrivals.entries()).map(([routeId, times]) => {
-      const route = routes.find(r => r.route_id === routeId);
+      const route = (routes || []).find(r => r.route_id === routeId);
       if (!route) return null;
       
       const sortedTimes = times.sort().slice(0, 5);
@@ -388,7 +388,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
   };
 
   const getRouteColor = (routeId: string): string => {
-    const route = routes.find(r => r.route_id === routeId);
+    const route = (routes || []).find(r => r.route_id === routeId);
     return route?.route_color ? `#${route.route_color}` : '#0066CC';
   };
 
@@ -396,7 +396,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
   const getRouteDirections = () => {
     if (!selectedRoute) return [];
     
-    const routeTripsData = trips.filter(trip => trip.route_id === selectedRoute);
+    const routeTripsData = (trips || []).filter(trip => trip.route_id === selectedRoute);
     const directions = [...new Set(routeTripsData.map(trip => trip.direction_id))];
     
     return directions.map(dir => ({
@@ -406,7 +406,7 @@ export const TransitMap: React.FC<TransitMapProps> = ({
     }));
   };
 
-  const selectedRouteData = selectedRoute ? routes.find(r => r.route_id === selectedRoute) : null;
+  const selectedRouteData = selectedRoute ? (routes || []).find(r => r.route_id === selectedRoute) : null;
   const routeDirections = getRouteDirections();
 
   return (
