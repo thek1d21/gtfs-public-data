@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Route, RouteAnalytics } from '../types/gtfs';
 import { Bus, ExternalLink, Info, TrendingUp, MapPin, Clock } from 'lucide-react';
 
@@ -17,6 +17,25 @@ export const RouteList: React.FC<RouteListProps> = ({
   onRouteDetails,
   routeAnalytics 
 }) => {
+  // Memoize expensive calculations
+  const sortedRoutes = useMemo(() => {
+    return [...routes].sort((a, b) => {
+      // Sort by route number (numeric if possible, otherwise alphabetic)
+      const aNum = parseInt(a.route_short_name);
+      const bNum = parseInt(b.route_short_name);
+      
+      if (!isNaN(aNum) && !isNaN(bNum)) {
+        return aNum - bNum;
+      }
+      
+      return a.route_short_name.localeCompare(b.route_short_name);
+    });
+  }, [routes]);
+
+  const analyticsMap = useMemo(() => {
+    return new Map(routeAnalytics.map(ra => [ra.route_id, ra]));
+  }, [routeAnalytics]);
+
   const getRouteTypeLabel = (type: number): string => {
     switch (type) {
       case 3:
@@ -37,7 +56,7 @@ export const RouteList: React.FC<RouteListProps> = ({
   };
 
   const getRouteAnalytics = (routeId: string) => {
-    return routeAnalytics.find(ra => ra.route_id === routeId);
+    return analyticsMap.get(routeId);
   };
 
   return (
@@ -55,7 +74,7 @@ export const RouteList: React.FC<RouteListProps> = ({
       </div>
       
       <div className="space-y-2 max-h-96 overflow-y-auto sidebar-scroll">
-        {routes.map((route) => {
+        {sortedRoutes.map((route) => {
           const analytics = getRouteAnalytics(route.route_id);
           
           return (

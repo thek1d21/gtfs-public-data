@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { GTFSParser } from './utils/gtfsParser';
-import { 
-  Stop, Route, Agency, Calendar, FeedInfo, Trip, StopTime, Shape, 
-  Frequency, FareAttribute, FareRule, RouteAnalytics, ServicePattern, StopAnalytics 
-} from './types/gtfs';
+import { Stop } from './types/gtfs';
 import { TransitMap } from './components/TransitMap';
 import { RouteList } from './components/RouteList';
 import { StatsPanel } from './components/StatsPanel';
 import { Header } from './components/Header';
 import { LoadingSpinner } from './components/LoadingSpinner';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { StatsCardSkeleton, RouteCardSkeleton, MapSkeleton } from './components/SkeletonLoader';
 import { Navigation } from './components/Navigation';
 import { ScheduleViewer } from './components/ScheduleViewer';
 import { ServiceCalendar } from './components/ServiceCalendar';
@@ -18,23 +16,10 @@ import { NotificationManager } from './components/NotificationManager';
 import { NotificationBanner } from './components/NotificationBanner';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-
-interface GTFSData {
-  stops: Stop[];
-  routes: Route[];
-  agency: Agency[];
-  calendar: Calendar[];
-  feedInfo: FeedInfo[];
-  trips: Trip[];
-  stopTimes: StopTime[];
-  shapes: Shape[];
-  frequencies: Frequency[];
-  fareAttributes: FareAttribute[];
-  fareRules: FareRule[];
-  routeAnalytics: RouteAnalytics[];
-  servicePatterns: ServicePattern[];
-  stopAnalytics: StopAnalytics[];
-}
+import { useGTFSData } from './hooks/useGTFSData';
+import { useRouteSelection } from './hooks/useRouteSelection';
+import { useJourneyPlanning } from './hooks/useJourneyPlanning';
+import { useNavigation } from './hooks/useNavigation';
 
 interface JourneyResult {
   id: string;
@@ -56,66 +41,82 @@ interface JourneyResult {
 }
 
 function AppContent() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<GTFSData | null>(null);
-  const [selectedRoute, setSelectedRoute] = useState<string | undefined>();
-  const [activeTab, setActiveTab] = useState('overview');
-  const [selectedRouteDetails, setSelectedRouteDetails] = useState<Route | null>(null);
-  const [selectedJourney, setSelectedJourney] = useState<JourneyResult | null>(null);
+  const { data, loading, error, retry } = useGTFSData();
+  const { selectedRoute, selectedRouteDetails, handleRouteSelect, handleRouteDetails, clearRouteDetails } = useRouteSelection();
+  const { selectedJourney, handleJourneySelect, clearJourney } = useJourneyPlanning();
+  const { activeTab, setActiveTab } = useNavigation();
 
   // Notification system
   const { getNotificationsForPage, getNotificationsForRoute, dismissNotification } = useNotifications();
-
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        const parser = new GTFSParser();
-        const gtfsData = await parser.loadAllData();
-        setData(gtfsData as GTFSData);
-      } catch (err) {
-        console.error('Failed to load GTFS data:', err);
-        setError('Failed to load transit data. Please try again later.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, []);
-
-  const handleRouteSelect = (routeId: string | undefined) => {
-    setSelectedRoute(routeId);
-    setSelectedJourney(null); // Clear journey when selecting route
-    if (activeTab !== 'overview') {
-      setActiveTab('overview');
-    }
-  };
-
-  const handleRouteDetails = (route: Route) => {
-    setSelectedRouteDetails(route);
-  };
 
   const handleStopClick = (stop: Stop) => {
     console.log('Stop clicked:', stop);
     // Additional stop click handling can be added here
   };
 
-  const handleJourneySelect = (journey: JourneyResult) => {
-    setSelectedJourney(journey);
-    setSelectedRoute(undefined); // Clear route selection when planning journey
+  const handleJourneySelectWithRouteUpdate = (journey: JourneyResult) => {
+    handleJourneySelect(journey);
+    // Clear route selection when planning journey
+    handleRouteSelect(undefined);
     
     // Highlight the journey routes on the map
     if (journey.routes.length > 0) {
       // For now, select the first route of the journey
       // In a more advanced implementation, we could highlight all routes
-      setSelectedRoute(journey.routes[0].route.route_id);
+      handleRouteSelect(journey.routes[0].route.route_id);
+    }
+  };
+
+  const handleRouteSelectWithJourneyClear = (routeId: string | undefined) => {
+    handleRouteSelect(routeId);
+    clearJourney(); // Clear journey when selecting route
+    if (activeTab !== 'overview') {
+      setActiveTab('overview');
     }
   };
 
   if (loading) {
-    return <LoadingSpinner />;
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* Header Skeleton */}
+          <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 mb-6">
+            <div className="flex items-center justify-between h-16 px-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+                <div>
+                  <div className="w-48 h-6 bg-gray-200 dark:bg-gray-700 rounded animate-pulse mb-1"></div>
+                  <div className="w-32 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats Panel Skeleton */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <StatsCardSkeleton key={i} />
+            ))}
+          </div>
+
+          {/* Main Content Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-1 space-y-6">
+              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="space-y-4">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <RouteCardSkeleton key={i} />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="lg:col-span-3">
+              <MapSkeleton />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error || !data) {
@@ -128,12 +129,20 @@ function AppContent() {
           <p className="text-gray-600 dark:text-gray-400 mb-4">
             {error || 'Unable to load transit data'}
           </p>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-madrid-primary text-white rounded-lg hover:bg-madrid-primary/90 transition-colors"
-          >
-            Retry
-          </button>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={retry}
+              className="px-4 py-2 bg-madrid-primary text-white rounded-lg hover:bg-madrid-primary/90 transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+            >
+              Reload Page
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -220,7 +229,7 @@ function AppContent() {
                   <RouteList
                     routes={data.routes}
                     selectedRoute={selectedRoute}
-                    onRouteSelect={handleRouteSelect}
+                    onRouteSelect={handleRouteSelectWithJourneyClear}
                     onRouteDetails={handleRouteDetails}
                     routeAnalytics={data.routeAnalytics}
                   />
@@ -235,7 +244,7 @@ function AppContent() {
                     routes={data.routes}
                     shapes={data.shapes}
                     trips={data.trips}
-                    stopTimes={data.stopTimes}
+                    onJourneySelect={handleJourneySelectWithRouteUpdate}
                     selectedRoute={selectedRoute}
                     onStopClick={handleStopClick}
                   />
@@ -353,7 +362,7 @@ function AppContent() {
           stops={data.stops}
           shapes={data.shapes}
           analytics={data.routeAnalytics.find(ra => ra.route_id === selectedRouteDetails.route_id)!}
-          onClose={() => setSelectedRouteDetails(null)}
+          onClose={clearRouteDetails}
         />
       )}
     </div>
@@ -362,11 +371,13 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <NotificationProvider>
-        <AppContent />
-      </NotificationProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <NotificationProvider>
+          <AppContent />
+        </NotificationProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
