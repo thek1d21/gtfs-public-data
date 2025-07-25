@@ -6,28 +6,17 @@ import {
 } from '../types/gtfs';
 
 export class GTFSParser {
-  private basePath = '/20250528_google_transit_M89_025/';
+  private basePath = '/data/';
 
-  async parseCSV<T>(filename: string): Promise<T[]> {
+  async loadJSON<T>(filename: string): Promise<T[]> {
     try {
       const response = await fetch(`${this.basePath}${filename}`);
-      const csvText = await response.text();
+      if (!response.ok) {
+        throw new Error(`Failed to load ${filename}: ${response.status}`);
+      }
+      const jsonData = await response.json();
       
-      return new Promise((resolve, reject) => {
-        Papa.parse(csvText, {
-          header: true,
-          skipEmptyLines: true,
-          transformHeader: (header) => header.trim(),
-          transform: (value) => value.trim(),
-          complete: (results) => {
-            if (results.errors.length > 0) {
-              console.warn(`Parsing warnings for ${filename}:`, results.errors);
-            }
-            resolve(results.data as T[]);
-          },
-          error: (error) => reject(error)
-        });
-      });
+      return jsonData;
     } catch (error) {
       console.error(`Error loading ${filename}:`, error);
       throw error;
@@ -35,7 +24,7 @@ export class GTFSParser {
   }
 
   async loadStops(): Promise<Stop[]> {
-    const stops = await this.parseCSV<any>('stops.txt');
+    const stops = await this.loadJSON<any>('stops.json');
     return stops.map(stop => ({
       ...stop,
       stop_lat: parseFloat(stop.stop_lat),
@@ -46,7 +35,7 @@ export class GTFSParser {
   }
 
   async loadRoutes(): Promise<Route[]> {
-    const routes = await this.parseCSV<any>('routes.txt');
+    const routes = await this.loadJSON<any>('routes.json');
     return routes.map(route => ({
       ...route,
       route_type: parseInt(route.route_type) || 0
@@ -54,11 +43,11 @@ export class GTFSParser {
   }
 
   async loadAgency(): Promise<Agency[]> {
-    return this.parseCSV<Agency>('agency.txt');
+    return this.loadJSON<Agency>('agency.json');
   }
 
   async loadCalendar(): Promise<Calendar[]> {
-    const calendar = await this.parseCSV<any>('calendar.txt');
+    const calendar = await this.loadJSON<any>('calendar.json');
     return calendar.map(cal => ({
       ...cal,
       monday: parseInt(cal.monday),
@@ -72,7 +61,7 @@ export class GTFSParser {
   }
 
   async loadCalendarDates(): Promise<CalendarDate[]> {
-    const calendarDates = await this.parseCSV<any>('calendar_dates.txt');
+    const calendarDates = await this.loadJSON<any>('calendar_dates.json');
     return calendarDates.map(cd => ({
       ...cd,
       exception_type: parseInt(cd.exception_type)
@@ -80,11 +69,11 @@ export class GTFSParser {
   }
 
   async loadFeedInfo(): Promise<FeedInfo[]> {
-    return this.parseCSV<FeedInfo>('feed_info.txt');
+    return this.loadJSON<FeedInfo>('feed_info.json');
   }
 
   async loadTrips(): Promise<Trip[]> {
-    const trips = await this.parseCSV<any>('trips.txt');
+    const trips = await this.loadJSON<any>('trips.json');
     return trips.map(trip => ({
       ...trip,
       direction_id: parseInt(trip.direction_id) || 0,
@@ -94,7 +83,7 @@ export class GTFSParser {
   }
 
   async loadStopTimes(): Promise<StopTime[]> {
-    const stopTimes = await this.parseCSV<any>('stop_times.txt');
+    const stopTimes = await this.loadJSON<any>('stop_times.json');
     return stopTimes.map(st => ({
       ...st,
       stop_sequence: parseInt(st.stop_sequence),
@@ -105,7 +94,7 @@ export class GTFSParser {
   }
 
   async loadShapes(): Promise<Shape[]> {
-    const shapes = await this.parseCSV<any>('shapes.txt');
+    const shapes = await this.loadJSON<any>('shapes.json');
     return shapes.map(shape => ({
       ...shape,
       shape_pt_lat: parseFloat(shape.shape_pt_lat),
@@ -116,7 +105,7 @@ export class GTFSParser {
   }
 
   async loadFrequencies(): Promise<Frequency[]> {
-    const frequencies = await this.parseCSV<any>('frequencies.txt');
+    const frequencies = await this.loadJSON<any>('frequencies.json');
     return frequencies.map(freq => ({
       ...freq,
       headway_secs: parseInt(freq.headway_secs),
@@ -125,7 +114,7 @@ export class GTFSParser {
   }
 
   async loadFareAttributes(): Promise<FareAttribute[]> {
-    const fareAttributes = await this.parseCSV<any>('fare_attributes.txt');
+    const fareAttributes = await this.loadJSON<any>('fare_attributes.json');
     return fareAttributes.map(fare => ({
       ...fare,
       price: parseFloat(fare.price) || 0,
@@ -136,7 +125,7 @@ export class GTFSParser {
   }
 
   async loadFareRules(): Promise<FareRule[]> {
-    return this.parseCSV<FareRule>('fare_rules.txt');
+    return this.loadJSON<FareRule>('fare_rules.json');
   }
 
   // Analytics and derived data methods

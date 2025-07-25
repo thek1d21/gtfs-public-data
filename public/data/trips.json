@@ -1,0 +1,50 @@
+[
+  {
+    "route_id": "8__670___",
+    "service_id": "1_8__670___",
+    "trip_id": "8__670___1_8__670____1_0",
+    "trip_headsign": "MORALZARZAL",
+    "trip_short_name": "",
+    "direction_id": 0,
+    "block_id": "",
+    "shape_id": "8__670___1_8__670____1_0",
+    "wheelchair_accessible": 0,
+    "bikes_allowed": 0
+  },
+  {
+    "route_id": "8__670___",
+    "service_id": "1_8__670___",
+    "trip_id": "8__670___1_8__670____1_1",
+    "trip_headsign": "HOSPITAL VILLALBA",
+    "trip_short_name": "",
+    "direction_id": 1,
+    "block_id": "",
+    "shape_id": "8__670___1_8__670____1_1",
+    "wheelchair_accessible": 0,
+    "bikes_allowed": 0
+  },
+  {
+    "route_id": "8__671___",
+    "service_id": "1_8__671___",
+    "trip_id": "8__671___1_8__671____1_0",
+    "trip_headsign": "MORALZARZAL",
+    "trip_short_name": "",
+    "direction_id": 0,
+    "block_id": "",
+    "shape_id": "8__671___1_8__671____1_0",
+    "wheelchair_accessible": 0,
+    "bikes_allowed": 0
+  },
+  {
+    "route_id": "8__671___",
+    "service_id": "1_8__671___",
+    "trip_id": "8__671___1_8__671____1_1",
+    "trip_headsign": "MADRID MONCLOA",
+    "trip_short_name": "",
+    "direction_id": 1,
+    "block_id": "",
+    "shape_id": "8__671___1_8__671____1_1",
+    "wheelchair_accessible": 0,
+    "bikes_allowed": 0
+  }
+]

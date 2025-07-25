@@ -1,0 +1,134 @@
+[
+  {
+    "route_id": "8__670___",
+    "agency_id": "CRTM",
+    "route_short_name": "670",
+    "route_long_name": "COLLADO VILLALBA (Hospital)-MORALZARZAL",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__670___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8__671___",
+    "agency_id": "CRTM",
+    "route_short_name": "671",
+    "route_long_name": "MADRID (Moncloa)-MORALZARZAL",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__671___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8__672___",
+    "agency_id": "CRTM",
+    "route_short_name": "672",
+    "route_long_name": "MADRID (Moncloa)-CERCEDA (Por Mataelpino)",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__672___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8__672_A__",
+    "agency_id": "CRTM",
+    "route_short_name": "672A",
+    "route_long_name": "MADRID (Moncloa)-CERCEDA (Directo)",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__672_A__.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8__673___",
+    "agency_id": "CRTM",
+    "route_short_name": "673",
+    "route_long_name": "MADRID (Moncloa)-COLLADO VILLALBA (Hospital)",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__673___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8__876___",
+    "agency_id": "CRTM",
+    "route_short_name": "876",
+    "route_long_name": "MADRID (Plaza de Castilla)-MORALZARZAL-COLLADO VILLALBA",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8__876___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "8_N_603___",
+    "agency_id": "CRTM",
+    "route_short_name": "N603",
+    "route_long_name": "MADRID (Moncloa)-MORALZARZAL",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/8_N_603___.aspx",
+    "route_color": "8EBF42",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "9__1__047_",
+    "agency_id": "CRTM",
+    "route_short_name": "1",
+    "route_long_name": "FFCC-PQUE. CORUÑA-LOS VALLES-PUEBLO-URBANIZACIONES",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/9__1__047_.aspx",
+    "route_color": "E60003",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "9__2__047_",
+    "agency_id": "CRTM",
+    "route_short_name": "2",
+    "route_long_name": "FFCC-PQUE. CORUÑA-CENTRO SALUD-LOS NEGRALES-FFCC",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/9__2__047_.aspx",
+    "route_color": "E60003",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "9__3__047_",
+    "agency_id": "CRTM",
+    "route_short_name": "3",
+    "route_long_name": "FF.CC. - EL GORRONAL - HOSPITAL",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/9__3__047_.aspx",
+    "route_color": "E60003",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "9__4__047_",
+    "agency_id": "CRTM",
+    "route_short_name": "4",
+    "route_long_name": "FFCC-PQUE. CORUÑA-PUEBLO",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/9__4__047_.aspx",
+    "route_color": "E60003",
+    "route_text_color": "FFFFFF"
+  },
+  {
+    "route_id": "9__6__047_",
+    "agency_id": "CRTM",
+    "route_short_name": "6",
+    "route_long_name": "FFCC-CANTOS ALTOS-PUEBLO-ARROYO ARRIBA",
+    "route_desc": "",
+    "route_type": 3,
+    "route_url": "https://www.crtm.es/9__6__047_.aspx",
+    "route_color": "E60003",
+    "route_text_color": "FFFFFF"
+  }
+]
